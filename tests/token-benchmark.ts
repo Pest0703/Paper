@@ -1,0 +1,12 @@
+import fs from 'node:fs';
+import {buildLegacyPromptForComparison,buildPromptRequest,estimateTokens} from '../src/services/promptEngine';
+const state=JSON.parse(fs.readFileSync('test-assets/.papertutor-profile/papertutor-data.json','utf8'));
+const paper=state.library?.find((x:any)=>x.name?.includes('6.0'))||state.library?.[0]; if(!paper)throw new Error('No persisted real-paper profile');
+const paras=paper.profile.sections.flatMap((s:any)=>s.paragraphs).filter((p:any)=>p.text.length>35);
+const pronouns=/该方法|这种|这些|上述|前者|后者|它/;
+const formula=/[=+−∑∈]|公式|表示/;
+const pool=[...paras.filter((p:any)=>pronouns.test(p.text)).slice(0,8),...paras.filter((p:any)=>formula.test(p.text)).slice(0,6),...paras.slice(20,36)];
+const samples=Array.from({length:30},(_,i)=>pool[i%pool.length]);
+const questions=['','这个术语是什么意思','换一个具体例子','作者为什么在这里写','这一节讲什么','解释公式变量','和前面的方法有什么区别','这个结论对应哪个表','再简单一点','你刚才第三点是什么意思'];
+const rows=samples.map((p:any,i:number)=>{const selected=(p.sentences?.[0]?.text||p.text).slice(0,180),q=questions[i%questions.length];const history=[{role:'user',content:'请继续解释前面的问题。'.repeat(20)},{role:'assistant',content:'这是之前的完整长回答。'.repeat(60)}];const old=estimateTokens(buildLegacyPromptForComparison(paper.profile,selected,history));const neo=buildPromptRequest(paper.profile,selected,q,{summary:'用户仍在理解当前方法与异构信息的关系',lastAnswerSummary:'上一轮说明了该句在段落中的逻辑作用'});return{case:i+1,task:neo.task,old,new:neo.tokenEstimate,reduction:+((1-neo.tokenEstimate/old)*100).toFixed(1),level:neo.contextLevel,retrieval:neo.retrieval};});
+const avg=(k:'old'|'new')=>Math.round(rows.reduce((n,r)=>n+r[k],0)/rows.length);console.log(JSON.stringify({paper:paper.name,cases:rows.length,oldAverage:avg('old'),newAverage:avg('new'),reductionPercent:+((1-avg('new')/avg('old'))*100).toFixed(1),minReduction:Math.min(...rows.map(r=>r.reduction)),maxReduction:Math.max(...rows.map(r=>r.reduction)),rows},null,2));

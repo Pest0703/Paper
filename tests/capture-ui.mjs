@@ -1,0 +1,40 @@
+import {_electron as electron} from '@playwright/test';
+import path from 'node:path';
+import fs from 'node:fs';
+import os from 'node:os';
+
+const root=path.resolve('.');
+const sample='private-test-resource';
+if(!fs.existsSync(sample))throw new Error('Capture test paper is unavailable');
+const profile=fs.mkdtempSync(path.join(os.tmpdir(),'papertutor-capture-'));
+const app=await electron.launch({args:['.',`--user-data-dir=${profile}`,`--test-pdf=${sample}`],cwd:root});
+const page=await app.firstWindow();
+try{
+  await page.getByText('导入论文').click();
+  await page.getByRole('heading',{name:'AI 模型'}).waitFor({timeout:120000});
+  await page.getByText('返回阅读').click();
+  await page.locator('[data-page="1"] canvas').waitFor({timeout:60000});
+  await page.waitForFunction(()=>document.querySelectorAll('.text-layer span').length>20,null,{timeout:60000});
+  await page.evaluate(()=>{const spans=[...document.querySelectorAll('.text-layer span')].filter(x=>(x.textContent||'').trim().length>3).slice(3,7);const r=document.createRange(),last=spans.at(-1);r.setStart(spans[0].firstChild,0);r.setEnd(last.firstChild,last.textContent.length);const s=getSelection();s.removeAllRanges();s.addRange(r);spans[0].parentElement.dispatchEvent(new MouseEvent('mouseup',{bubbles:true}))});
+  const recognized=await page.getByLabel('编辑选中内容').inputValue();
+  if(recognized.length<2)throw new Error('Selected text was not prepared for editing');
+  if(await page.locator('.thinking').count())throw new Error('Text selection called the model before confirmation');
+  await page.getByRole('button',{name:'只解答疑问'}).click();
+  await page.getByLabel('本次提示词').fill('这句话为什么需要这个假设？请只回答这个问题。');
+  if(!(await page.getByRole('button',{name:'确认文字与提示词并分析'}).isEnabled()))throw new Error('Text confirmation button is unavailable');
+  await page.getByLabel('截图提问').click();
+  const visiblePage=await page.evaluate(()=>{const el=[...document.querySelectorAll('.capture-layer')].find(x=>{const r=x.getBoundingClientRect();return r.bottom>170&&r.top<window.innerHeight-30});return el?.parentElement?.getAttribute('data-page')});
+  if(!visiblePage)throw new Error('No capture layer is visible in the reader');
+  const layer=page.locator(`[data-page="${visiblePage}"] .capture-layer`);
+  await layer.waitFor();
+  const box=await layer.boundingBox();if(!box)throw new Error('Capture layer has no bounds');
+  const startX=Math.max(5,box.x+Math.min(120,box.width*.2)),startY=Math.max(170,box.y+Math.min(180,box.height*.2));
+  await page.mouse.move(startX,startY);await page.mouse.down();await page.waitForTimeout(100);await page.mouse.move(Math.min(1380,startX+Math.min(320,box.width*.5)),Math.min(870,startY+Math.min(160,box.height*.3)),{steps:8});await page.waitForTimeout(100);await page.mouse.up();
+  const preview=page.locator('.capture-preview img');
+  await preview.waitFor();
+  const src=await preview.getAttribute('src');
+  if(!src?.startsWith('data:image/png;base64,')||src.length<1000)throw new Error('Captured PNG is invalid');
+  await page.getByLabel('截图问题').fill('请解释截图中的公式和每个符号。');
+  if(!(await page.getByRole('button',{name:'确认截图并分析'}).isEnabled()))throw new Error('Vision submit button is disabled');
+  console.log(JSON.stringify({textPreparedChars:recognized.length,customSelectionPrompt:true,textRequestBeforeConfirmation:false,captureMode:true,pngChars:src.length,editableQuestion:true,submitReady:true},null,2));
+}finally{await app.close();fs.rmSync(profile,{recursive:true,force:true})}

@@ -1,0 +1,15 @@
+import { _electron as electron } from '@playwright/test';
+import path from 'node:path'; import fs from 'node:fs';
+const root=path.resolve('.'), profile=path.join(root,'test-assets','.papertutor-profile'); fs.mkdirSync(path.join(root,'screenshots'),{recursive:true});
+const app=await electron.launch({args:['.',`--user-data-dir=${profile}`],cwd:root}); const page=await app.firstWindow();
+await page.getByRole('button',{name:'PT PaperTutor'}).waitFor(); await page.getByLabel('设置').click();
+if(!(await page.getByLabel('API Key').inputValue())) throw new Error('The isolated live-test profile has no saved API key');
+await page.getByLabel('Model').fill('deepseek-flash'); await page.getByLabel('Max Tokens').fill('600'); await page.getByLabel('请求超时（毫秒）').fill('240000'); await page.getByLabel('启用流式输出').check(); await page.getByText('保存设置').click(); await page.getByRole('heading',{name:'AI 模型'}).waitFor({state:'hidden'});
+await page.getByLabel('当前页').fill('12'); await page.getByLabel('当前页').press('Enter'); await page.waitForFunction(()=>document.querySelectorAll('[data-page="12"] .text-layer span').length>30,null,{timeout:60000}); await page.waitForTimeout(500);
+await page.evaluate(()=>{const all=[...document.querySelectorAll('[data-page="12"] .text-layer span')].filter(x=>(x.textContent||'').trim().length>5);const start=Math.min(18,all.length-5),spans=all.slice(start,start+5);const r=document.createRange();r.setStart(spans[0].firstChild,0);const last=spans.at(-1);r.setEnd(last.firstChild,last.textContent.length);const s=getSelection();s.removeAllRanges();s.addRange(r);spans[0].parentElement.dispatchEvent(new MouseEvent('mouseup',{bubbles:true}));});
+await page.locator('.selection').waitFor(); await page.screenshot({path:path.join(root,'screenshots','selection-highlight-fixed.png')});
+const started=Date.now(); const outcome=await Promise.race([page.locator('.turn.assistant').last().waitFor({timeout:260000}).then(()=> 'answer'),page.locator('.ai-error').waitFor({timeout:260000}).then(()=> 'error')]);
+if(outcome==='answer') await page.locator('.thinking').waitFor({state:'hidden',timeout:260000});
+const text=outcome==='answer'?await page.locator('.turn.assistant').last().innerText():await page.locator('.ai-error').innerText(); await page.screenshot({path:path.join(root,'screenshots','answer-fixed.png')});
+const scroller=page.locator('.pdf-scroll'); const before=await scroller.evaluate(el=>el.scrollTop); await scroller.hover(); await page.mouse.wheel(0,1400); await page.waitForTimeout(500); const after=await scroller.evaluate(el=>el.scrollTop); await page.screenshot({path:path.join(root,'screenshots','continuous-scroll-fixed.png')});
+console.log(JSON.stringify({outcome,elapsedSeconds:Math.round((Date.now()-started)/1000),visibleChars:text.length,selectedChars:(await page.locator('.selection blockquote').innerText()).length,continuousPages:await page.locator('.page-wrap').count(),wheelDelta:Math.round(after-before),currentPage:await page.getByLabel('当前页').inputValue()})); await app.close();

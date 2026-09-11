@@ -1,0 +1,2 @@
+import{describe,it,expect}from'vitest';import{formatTutorAnswer}from'./answerFormatter';
+describe('answer formatter',()=>{it('separates all AUTO points without changing their words',()=>{const x=formatTutorAnswer('①意思：A。②例子：B。③这里的作用：C。');expect(x).toContain('A。\n\n②');expect(x).toContain('② **例子：** B。');expect(x.replace(/\*|\s/g,'')).toContain('①意思：A。②例子：B。')});it('collapses excessive blank lines',()=>expect(formatTutorAnswer('A\n\n\n\nB')).toBe('A\n\nB'))});

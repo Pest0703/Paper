@@ -1,0 +1,58 @@
+.global-error { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); z-index: 30; max-width: min(620px, calc(100vw - 32px)); display: flex; align-items: center; gap: 16px; padding: 11px 13px 11px 16px; border: 1px solid #e7b7ad; border-radius: 10px; background: #fff7f4; color: #8b352a; box-shadow: 0 12px 36px rgba(50,30,25,.16); font-size: 12px; }
+.global-error button { border: 0; background: #8b352a; color: white; border-radius: 7px; padding: 5px 9px; }
+.startup { height: 100dvh; display: grid; place-items: center; background: #eef0ec; color: #697672; font: 13px "Segoe UI Variable", "Microsoft YaHei UI", sans-serif; }
+.text-layer { opacity: 1 !important; }
+.text-layer span::selection { background: rgba(77,148,255,.38) !important; color: transparent !important; text-shadow: none !important; }
+.pdf-scroll.continuous { display: flex; flex-direction: column; align-items: center; gap: 24px; scroll-behavior: auto; }
+.continuous .page-wrap { flex: none; margin: 0 auto; }
+.page-number { position: absolute; right: -34px; top: 8px; min-width: 26px; padding: 3px 5px; border-radius: 6px; background: rgba(29,41,39,.72); color: white; font-size: 10px; text-align: center; user-select: none; }
+.turn.assistant > p { margin: 0 0 14px !important; padding-bottom: 10px; border-bottom: 1px solid #e7ebe7; }
+.turn.assistant > p:last-child { border-bottom: 0; }
+.prompt-debug { margin-top: 14px; font-size: 11px; color: #56635f; }
+.prompt-debug pre { white-space: pre-wrap; max-height: 260px; overflow: auto; background: #f1f4f1; padding: 10px; border-radius: 8px; }
+.selection-editor { display: grid; gap: 8px; }
+.selection-label { display: flex; justify-content: space-between; gap: 12px; align-items: center; }
+.selection-label small { font-size: 9px; color: #74817d; font-weight: 400; }
+.selection-editor textarea { width: 100%; min-height: 84px; max-height: 220px; resize: vertical; border: 1px solid #cbd8d2; border-radius: 8px; padding: 9px 10px; background: rgba(255,255,255,.8); color: #35433f; font: 12px/1.6 "Segoe UI Variable", "Microsoft YaHei UI", sans-serif; outline: 0; }
+.selection-editor textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(21,120,111,.12); background: white; }
+.selection-editor.edited { background: #fff8e9; }
+.selection-actions { display: flex; justify-content: flex-end; gap: 6px; }
+.selection-actions button { display: flex; align-items: center; gap: 4px; border: 1px solid #ccd5d0; border-radius: 7px; background: white; padding: 5px 8px; font-size: 10px; cursor: pointer; }
+.selection-actions button:disabled { opacity: .45; cursor: default; }
+.selection-actions .reanalyze { border-color: var(--accent); background: var(--accent); color: white; }
+@media (max-width: 800px) { .page-number { right: 8px; } }
+.reader-content { min-height: 0; display: grid; grid-template-columns: 150px minmax(0,1fr); }
+.bookmark-rail { min-height: 0; overflow: auto; background: #f7f8f5; border-right: 1px solid var(--line); padding: 13px 10px; }
+.bookmark-heading { display: flex; align-items: center; gap: 6px; color: var(--accent); font-size: 12px; margin-bottom: 10px; }
+.bookmark-rail form { display: grid; gap: 5px; }
+.bookmark-rail form input { width: 100%; min-width: 0; height: 30px; border: 1px solid var(--line); border-radius: 7px; padding: 0 7px; font-size: 10px; outline: 0; }
+.bookmark-rail form input:focus { border-color: var(--accent); }
+.bookmark-rail form button { height: 28px; border: 0; border-radius: 7px; background: var(--accent); color: white; font-size: 10px; display: flex; align-items: center; justify-content: center; gap: 4px; cursor: pointer; }
+.bookmark-list { display: grid; gap: 5px; margin-top: 10px; }
+.bookmark-list > p { font-size: 10px; color: var(--muted); text-align: center; }
+.bookmark-item { display: grid; grid-template-columns: minmax(0,1fr) 24px; border: 1px solid var(--line); border-radius: 8px; background: white; overflow: hidden; }
+.bookmark-item button { border: 0; background: none; }
+.bookmark-jump { min-width: 0; padding: 7px; text-align: left; cursor: pointer; }
+.bookmark-jump span, .bookmark-jump small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bookmark-jump span { font-size: 10px; }
+.bookmark-jump small { font-size: 9px; color: var(--muted); margin-top: 2px; }
+.bookmark-delete { color: #8a5048; cursor: pointer; }
+@media (max-width: 900px) { .reader-content { grid-template-columns: 112px minmax(0,1fr); } .bookmark-rail { padding: 10px 7px; } }
+.pdf-toolbar .active-tool { background: var(--accent) !important; color: white; }
+.capture-layer { position: absolute; inset: 0; z-index: 6; cursor: crosshair; background: rgba(21,120,111,.04); touch-action: none; user-select: none; }
+.capture-layer > span { position: sticky; display: block; top: 10px; width: max-content; margin: 10px auto; padding: 5px 9px; border-radius: 7px; background: rgba(20,35,32,.8); color: white; font-size: 10px; pointer-events: none; }
+.capture-box { position: absolute; border: 2px solid #168b80; background: rgba(43,177,163,.16); box-shadow: 0 0 0 9999px rgba(14,26,23,.16); pointer-events: none; }
+.capture-preview { display: grid; gap: 9px; background: #eef6f3; }
+.capture-preview img { display: block; width: 100%; max-height: 230px; object-fit: contain; border: 1px solid #cddbd6; border-radius: 8px; background: white; }
+.capture-preview textarea { width: 100%; min-height: 88px; resize: vertical; border: 1px solid #cbd8d2; border-radius: 8px; padding: 9px 10px; background: white; color: #35433f; font: 12px/1.6 "Segoe UI Variable", "Microsoft YaHei UI", sans-serif; outline: 0; }
+.capture-preview textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(21,120,111,.12); }
+.settings-form > label > textarea { width: 100%; min-height: 110px; resize: vertical; padding: 10px 11px; border: 1px solid var(--line); border-radius: 9px; background: white; color: var(--ink); font: 12px/1.6 "Segoe UI Variable", "Microsoft YaHei UI", sans-serif; outline: 0; }
+.settings-form > label > textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.prompt-presets { display: flex; flex-wrap: wrap; gap: 5px; }
+.prompt-presets button { border: 1px solid #ccd5d0; border-radius: 7px; background: white; padding: 5px 7px; color: #53605d; font-size: 9px; cursor: pointer; }
+.prompt-presets button.active { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); font-weight: 700; }
+.prompt-presets button.custom-prompt { border-color: #8b6d25; background: #fff5d9; color: #745717; }
+.selection-prompt-label { display: grid; gap: 5px; color: #61706c; font-size: 10px; }
+.selection-prompt-label.custom-active { color: #745717; font-weight: 700; }
+.selection-prompt-label.custom-active textarea { border-color: #c6a34f; box-shadow: 0 0 0 3px rgba(198,163,79,.14); }
+.selection-editor .selection-prompt-label textarea { min-height: 68px; max-height: 170px; }
