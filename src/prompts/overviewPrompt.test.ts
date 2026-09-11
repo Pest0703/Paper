@@ -1,0 +1,1 @@
+import{expect,it}from'vitest';import{OVERVIEW_SYSTEM_PROMPT}from'./overviewPrompt';it('requires Chinese overview without mistranslating scientific names',()=>{expect(OVERVIEW_SYSTEM_PROMPT).toContain('必须使用简体中文');expect(OVERVIEW_SYSTEM_PROMPT).toContain('数据集');expect(OVERVIEW_SYSTEM_PROMPT).toContain('保留原文')});

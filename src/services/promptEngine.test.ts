@@ -15,6 +15,7 @@ const profile:PaperProfile={title:'sample-academic-paper',authors:'A',abstract:'
 
 describe('Prompt Engine v1',()=>{
  it('stores the core prompt independently and versions the quality revision',()=>{expect(PROMPT_VERSION).toBe('papertutor_core_v2');expect(CORE_PAPER_TUTOR_PROMPT).toContain('TASK=AUTO 时仅输出：①意思 ②例子 ③这里的作用 ④本段核心 ⑤本节位置 ⑥阅读重点');expect(CORE_PAPER_TUTOR_PROMPT).toContain('仅调换原文语序')});
+ it('defaults mentor output to Simplified Chinese while preserving scientific names',()=>{expect(CORE_PAPER_TUTOR_PROMPT).toContain('默认使用简体中文');expect(CORE_PAPER_TUTOR_PROMPT).toContain('模型名、方法名、数据集、公式、指标和标准缩写保留原文');expect(CORE_PAPER_TUTOR_PROMPT).toContain('用户明确要求其他语言')});
  it('supports every required task code',()=>expect(TASK_CODES).toHaveLength(13));
  it.each([['换一个例子','EXAMPLE'],['作者为什么在这里写','WHY_HERE'],['解释公式变量','FORMULA'],['这个术语是什么意思','TERM'],['和前面方法有什么区别','COMPARE'],['对应哪个表','REFERENCE'],['这一节讲什么','SECTION'],['再简单一点','SIMPLIFY']] as const)('routes %s', (q,t)=>expect(routeTask(q,false)).toBe(t));
  it('marks the selection once inside its paragraph',()=>{const r=buildPromptRequest(profile,'这些路线分别解决不同的信息融合问题');expect(r.packet.match(/<<.*>>/g)).toHaveLength(1);expect(r.packet).not.toContain('[SELECTED]');});

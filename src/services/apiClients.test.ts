@@ -1,0 +1,3 @@
+import{describe,expect,it}from'vitest';import{OcrModelClient,TextModelClient,VisionModelClient}from'./apiClients';
+const s:any={textBaseUrl:'URL-A',textModel:'MODEL-A',visionBaseUrl:'URL-B',visionModel:'MODEL-B',ocrBaseUrl:'URL-C',ocrModel:'MODEL-C'},k={text:'KEY-A',vision:'KEY-B',ocr:'KEY-C'};
+describe('three credential routes',()=>{it('keeps URL key and model isolated',()=>{expect(new TextModelClient().config(s,k)).toEqual({baseUrl:'URL-A',apiKey:'KEY-A',model:'MODEL-A'});expect(new VisionModelClient().config(s,k)).toEqual({baseUrl:'URL-B',apiKey:'KEY-B',model:'MODEL-B'});expect(new OcrModelClient().config(s,k)).toEqual({baseUrl:'URL-C',apiKey:'KEY-C',model:'MODEL-C'})})});
