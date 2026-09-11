@@ -19,6 +19,7 @@ import { formatTutorAnswer } from "./services/answerFormatter";
 import { completeSelection } from "./services/context";
 import { parsePaper } from "./services/parser";
 import { attachVisionImage, migrateModelSettings, routeErrorMessage, withRouteModel, type ModelRoute } from "./services/modelRouting";
+import {createCallRecord,createSnapshot,type AiCallRecord} from "./services/aiObservability";
 import type { Bookmark, PaperRecord, Settings as SettingsType } from "./types";
 const defaults: SettingsType = {
   provider: "Custom OpenAI Compatible",
@@ -54,8 +55,9 @@ export function App() {
   const [panel, setPanel] = useState(true);
   const [selected, setSelected] = useState("");
   const [originalSelected, setOriginalSelected] = useState("");
-  const [capture, setCapture] = useState<{dataUrl:string;page:number}|null>(null);
+  const [capture, setCapture] = useState<{dataUrl:string;page:number;width?:number;height?:number}|null>(null);
   const [answer, setAnswer] = useState("");
+  const [answerCall,setAnswerCall]=useState<AiCallRecord|null>(null);
   const [turns, setTurns] = useState<Turn[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -234,7 +236,9 @@ export function App() {
     const id = crypto.randomUUID();
     setRequestId(id);
     const previousVisibleAnswer = answer;
+    const previousAnswerCall=answerCall;
     setAnswer("");
+    setAnswerCall(null);
     setError("");
     setBusy(true);
     setPanel(true);
@@ -246,10 +250,11 @@ export function App() {
     const requestModel=routed.model;
     const imageHash=imageDataUrl?await sha(imageDataUrl):'';
     const cacheKey = [paper.id, route, await sha(text), imageHash, built.task, built.promptVersion, requestModel, built.contextHash].join(":");
-    const cached = answerCache.current.get(cacheKey);
-    if (cached) { const formatted=formatTutorAnswer(cached); setAnswer(formatted); setBusy(false); if (followup) setReadingState(summarizeConversation(followup,nextState,formatted)); recordMetric({...built,route,provider:settings.provider,model:requestModel,cacheHit:true,latency:0,outputTokens:0}); return; }
     let messages:any[]=built.messages.map(m=>({...m}));
     if(imageDataUrl)messages=attachVisionImage(messages,imageDataUrl);
+    const snapshot=createSnapshot({requestId:id,callType:route,model:requestModel,selection:text,question:followup,state:nextState.summary,built,messages,image:imageDataUrl?{attached:true,mime:'image/png',width:capture?.width,height:capture?.height,page:capture?.page}:undefined});
+    const cached = answerCache.current.get(cacheKey);
+    if (cached) { const formatted=formatTutorAnswer(cached);const call=createCallRecord({snapshot,latencyMs:1,localCacheHit:true});setAnswer(formatted);setAnswerCall(call);setBusy(false);if(followup)setReadingState(summarizeConversation(followup,nextState,formatted));recordMetric(call);return; }
     const r = await window.paperTutor.llmRequest({
       id,
       route,
@@ -272,13 +277,16 @@ export function App() {
       setError("模型请求已经结束，但没有返回正文。请关闭流式输出或更换模型后重试。");
       return;
     }
-    if (followup) setTurns((t) => [...t, ...(previousVisibleAnswer?[{role:'assistant' as const,content:previousVisibleAnswer}]:[]), {role:'user' as const,content:followup}].slice(-6));
+    if (followup) setTurns((t) => [...t, ...(previousVisibleAnswer?[{role:'assistant' as const,content:previousVisibleAnswer,call:previousAnswerCall||undefined}]:[]), {role:'user' as const,content:followup}].slice(-6));
     else setTurns([]);
     setAnswer(final);
+    const cacheDetails=r.usage?.prompt_tokens_details||r.usage?.input_tokens_details;const providerCacheHit=cacheDetails?Number(cacheDetails.cached_tokens||0)>0:undefined;
+    const call=createCallRecord({snapshot,usage:r.usage,latencyMs:r.latency,ttftMs:r.ttft,localCacheHit:false,providerCacheHit});
+    setAnswerCall(call);
     answerCache.current.set(cacheKey, final);
     const cacheEntries=[...answerCache.current.entries()].slice(-100); answerCache.current=new Map(cacheEntries); window.paperTutor.saveState({answerCache:Object.fromEntries(cacheEntries)});
     setReadingState(followup ? summarizeConversation(followup,nextState,final) : summarizeConversation('',{summary:''},final));
-    recordMetric({...built,route,provider:settings.provider,model:requestModel,cacheHit:false,latency:r.latency,outputTokens:r.usage?.completion_tokens,inputTokens:r.usage?.prompt_tokens});
+    recordMetric(call);
   }
   function explainText(text:string,followup?:string){return executeExplanation(text,followup,'TEXT')}
   function explainVision(text:string,followup:string|undefined,imageDataUrl:string){return executeExplanation(text,followup,'VISION',imageDataUrl)}
@@ -288,14 +296,15 @@ export function App() {
     setCapture(null);
     setOriginalSelected(completed);
     setAnswer('');
+    setAnswerCall(null);
     setTurns([]);
     setReadingState({summary:''});
     setError('');
     setPanel(true);
   }
-  function onCaptured(next:{dataUrl:string;page:number}){setCapture(next);setSelected(`第 ${next.page} 页截图`);setOriginalSelected(`第 ${next.page} 页截图`);setAnswer('');setTurns([]);setReadingState({summary:''});setError('');setPanel(true)}
+  function onCaptured(next:{dataUrl:string;page:number;width:number;height:number}){setCapture(next);setSelected(`第 ${next.page} 页截图`);setOriginalSelected(`第 ${next.page} 页截图`);setAnswer('');setAnswerCall(null);setTurns([]);setReadingState({summary:''});setError('');setPanel(true)}
   function analyzeCapture(question:string){if(!capture)return;const nearby=paper?.profile.sections.flatMap(s=>s.paragraphs).filter(p=>p.page===capture.page).slice(0,3).map(p=>p.text).join(' ').slice(0,1800)||'';explainVision(`第 ${capture.page} 页截图。${nearby}`,question,capture.dataUrl)}
-  function recordMetric(x:any){ const row={at:new Date().toISOString(),route:x.route,provider:x.provider,model:x.model,task:x.task,inputTokens:x.inputTokens||x.tokenEstimate,outputTokens:x.outputTokens,latency:x.latency,contextLevel:x.contextLevel,retrieval:x.retrieval,cacheHit:x.cacheHit,promptVersion:x.promptVersion,contextHash:x.contextHash,sources:x.sources}; tokenMetrics.current=[...tokenMetrics.current.slice(-99),row]; window.paperTutor.saveState({tokenMetrics:tokenMetrics.current,lastPromptMetric:row}); }
+  function recordMetric(call:AiCallRecord){const row={at:new Date().toISOString(),requestId:call.requestId,route:call.callType,model:call.model,task:call.taskType,inputTokens:call.usage.inputTokens,outputTokens:call.usage.outputTokens,totalTokens:call.usage.totalTokens,latency:call.latencyMs,ttft:call.ttftMs,localCacheHit:call.localCacheHit,providerCacheHit:call.providerCacheHit,estimatedCost:call.estimatedCost};tokenMetrics.current=[...tokenMetrics.current.slice(-99),row];window.paperTutor.saveState({tokenMetrics:tokenMetrics.current,lastPromptMetric:row})}
   function updateRec(ch: Partial<PaperRecord>) {
     const current=paperRef.current||paper;
     if (!current) return;
@@ -404,6 +413,7 @@ export function App() {
               originalSelected={originalSelected}
               capture={capture}
               answer={answer}
+              answerCall={answerCall}
               turns={turns}
               busy={busy}
               error={error}
@@ -413,7 +423,7 @@ export function App() {
               onResetSelection={() => setSelected(originalSelected)}
               onReanalyze={(question) => { setTurns([]); setReadingState({summary:''}); explainText(selected,question.trim()||undefined); }}
               onAnalyzeCapture={analyzeCapture}
-              onClearCapture={()=>{setCapture(null);setSelected('');setOriginalSelected('');setAnswer('');setTurns([])}}
+              onClearCapture={()=>{setCapture(null);setSelected('');setOriginalSelected('');setAnswer('');setAnswerCall(null);setTurns([])}}
               onCancel={() => {
                 window.paperTutor.cancelRequest(requestId);
                 setBusy(false);

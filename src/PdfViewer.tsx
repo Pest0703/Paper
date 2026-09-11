@@ -27,7 +27,7 @@ type Props = {
   onScroll: (n: number) => void;
   onAddBookmark: (name: string, page: number, scrollTop: number) => void;
   onRemoveBookmark: (id: string) => void;
-  onCapture: (capture: { dataUrl: string; page: number }) => void;
+  onCapture: (capture: { dataUrl: string; page: number; width:number; height:number }) => void;
 };
 
 function PdfPage({
@@ -43,7 +43,7 @@ function PdfPage({
   scale: number;
   onSelect: (text: string, page: number) => void;
   captureMode: boolean;
-  onCapture: (capture: { dataUrl: string; page: number }) => void;
+  onCapture: (capture: { dataUrl: string; page: number; width:number; height:number }) => void;
 }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const layer = useRef<HTMLDivElement>(null);
@@ -103,7 +103,7 @@ function PdfPage({
   const point=(e:React.PointerEvent<HTMLDivElement>)=>{const r=e.currentTarget.getBoundingClientRect();return{x:Math.max(0,Math.min(r.width,e.clientX-r.left)),y:Math.max(0,Math.min(r.height,e.clientY-r.top))}};
   const finishCapture=(e:React.PointerEvent<HTMLDivElement>)=>{
     const active=dragRef.current;if(!active||!canvas.current)return;const p=point(e),x=Math.min(active.x1,p.x),y=Math.min(active.y1,p.y),w=Math.abs(p.x-active.x1),h=Math.abs(p.y-active.y1);dragRef.current=null;setDrag(null);if(w<12||h<12)return;
-    const source=canvas.current,ratio=source.width/Math.max(1,source.getBoundingClientRect().width),out=document.createElement('canvas');out.width=Math.round(w*ratio);out.height=Math.round(h*ratio);out.getContext('2d')?.drawImage(source,Math.round(x*ratio),Math.round(y*ratio),out.width,out.height,0,0,out.width,out.height);onCapture({dataUrl:out.toDataURL('image/png'),page:number});
+    const source=canvas.current,ratio=source.width/Math.max(1,source.getBoundingClientRect().width),out=document.createElement('canvas');out.width=Math.round(w*ratio);out.height=Math.round(h*ratio);out.getContext('2d')?.drawImage(source,Math.round(x*ratio),Math.round(y*ratio),out.width,out.height,0,0,out.width,out.height);onCapture({dataUrl:out.toDataURL('image/png'),page:number,width:out.width,height:out.height});
   };
   return (
     <div className="page-wrap" data-page={number} style={size} onMouseUp={select}>

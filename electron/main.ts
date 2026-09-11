@@ -5,6 +5,7 @@ import crypto from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import Store from 'electron-store';
+import { parseStreamData } from './streamParser.js';
 
 type AppState = { library?: unknown[]; settings?: Record<string, unknown>; activePaperId?: string; encryptedSecret?: string };
 const store = new Store<AppState>({ name: 'papertutor-data', defaults: { library: [], settings: {} } });
@@ -64,18 +65,18 @@ ipcMain.handle('llm-request', async (_e, payload: any) => {
   try {
     const response = await fetch(`${String(baseUrl).replace(/\/$/, '')}/chat/completions`, { method: 'POST', signal: controller.signal,
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-      body: JSON.stringify({ model, messages, temperature, max_tokens: maxTokens, stream, ...providerOptions }) });
+      body: JSON.stringify({ model, messages, temperature, max_tokens: maxTokens, stream, ...(stream?{stream_options:{include_usage:true}}:{}), ...providerOptions }) });
     if (!response.ok) { const detail = await response.text(); throw Object.assign(new Error(detail), { status: response.status }); }
     const contentType = response.headers.get('content-type') || '';
     if (!stream || !contentType.includes('text/event-stream')) { const json=await response.json() as any; return { text: json.choices?.[0]?.message?.content || '', ok: true, route, model, usage:json.usage, latency:Date.now()-startedAt }; }
-    const reader = response.body?.getReader(); const decoder = new TextDecoder(); let buffer = '', full = '', reasoning = '', streamDone = false, chunks = 0, finishReason = '', usage:any;
+    const reader = response.body?.getReader(); const decoder = new TextDecoder(); let buffer = '', full = '', reasoning = '', streamDone = false, chunks = 0, finishReason = '', usage:any, firstTokenAt:number|undefined;
     while (reader && !streamDone) { const { done, value } = await reader.read(); if (done) break; buffer += decoder.decode(value, { stream: true });
       const lines = buffer.split('\n'); buffer = lines.pop() || '';
-      for (const line of lines) if (line.trimStart().startsWith('data:')) { const data = line.trimStart().slice(5).trim(); if (data === '[DONE]') { streamDone = true; break; } try { const parsed = JSON.parse(data); usage=parsed.usage||usage; const choice = parsed.choices?.[0]; const delta = choice?.delta || {}; const token = typeof delta.content === 'string' ? delta.content : ''; const thought = typeof delta.reasoning_content === 'string' ? delta.reasoning_content : ''; chunks += 1; full += token; reasoning += thought; finishReason = choice?.finish_reason || finishReason; if (token) win?.webContents.send('llm-stream', { id, token, phase: 'answer' }); else if (thought) win?.webContents.send('llm-stream', { id, phase: 'reasoning', reasoningChars: reasoning.length }); } catch {} }
+      for (const line of lines) if (line.trimStart().startsWith('data:')) { const data = line.trimStart().slice(5).trim(); if (data === '[DONE]') { streamDone = true; break; } const parsed=parseStreamData(data);if(parsed){usage=parsed.usage||usage;chunks+=1;full+=parsed.token;reasoning+=parsed.thought;finishReason=parsed.finishReason||finishReason;if(parsed.token){firstTokenAt??=Date.now();win?.webContents.send('llm-stream',{id,token:parsed.token,phase:'answer'})}else if(parsed.thought)win?.webContents.send('llm-stream',{id,phase:'reasoning',reasoningChars:reasoning.length})} }
     }
     if (!full.trim() && reasoning.trim()) return { ok: false, code: 'empty', message: 'The model returned reasoning but no final answer.', chunks, finishReason };
     if (!full.trim()) return { ok: false, code: 'empty', message: 'The model stream ended without answer content.', chunks, finishReason };
-    return { text: full, ok: true, route, model, chunks, finishReason, usage, latency:Date.now()-startedAt };
+    return { text: full, ok: true, route, model, chunks, finishReason, usage, ttft:firstTokenAt?firstTokenAt-startedAt:undefined, latency:Date.now()-startedAt };
   } catch (error: any) {
     const status = error.status; const code = error.name === 'AbortError' ? 'timeout' : status === 401 ? 'auth' : status === 404 ? 'model' : status === 429 ? 'rate' : status === 400 && /image|vision|multimodal/i.test(String(error.message)) ? 'vision' : status >= 500 ? 'server' : 'network';
     return { ok: false, route, model, code, message: error.message };
