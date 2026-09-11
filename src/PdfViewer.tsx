@@ -5,6 +5,7 @@ import type { PDFDocumentProxy } from "pdfjs-dist";
 import {
   BookmarkSimple,
   Camera,
+  Scan,
   CaretLeft,
   CaretRight,
   MagnifyingGlass,
@@ -27,7 +28,18 @@ type Props = {
   onScroll: (n: number) => void;
   onAddBookmark: (name: string, page: number, scrollTop: number) => void;
   onRemoveBookmark: (id: string) => void;
-  onCapture: (capture: { dataUrl: string; page: number; width:number; height:number }) => void;
+  onCapture: (capture: {
+    dataUrl: string;
+    page: number;
+    width: number;
+    height: number;
+  }) => void;
+  onOcr: (capture: {
+    dataUrl: string;
+    page: number;
+    width: number;
+    height: number;
+  }) => void;
 };
 
 function PdfPage({
@@ -43,24 +55,39 @@ function PdfPage({
   scale: number;
   onSelect: (text: string, page: number) => void;
   captureMode: boolean;
-  onCapture: (capture: { dataUrl: string; page: number; width:number; height:number }) => void;
+  onCapture: (capture: {
+    dataUrl: string;
+    page: number;
+    width: number;
+    height: number;
+  }) => void;
 }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const layer = useRef<HTMLDivElement>(null);
   // Reserve an A4-sized slot immediately so pages above the current view do not
   // grow later and make a page jump land several pages too early.
   const [size, setSize] = useState({ width: 595 * scale, height: 842 * scale });
-  const [drag, setDrag] = useState<{x1:number;y1:number;x2:number;y2:number}|null>(null);
-  const dragRef=useRef<{x1:number;y1:number;x2:number;y2:number}|null>(null);
+  const [drag, setDrag] = useState<{
+    x1: number;
+    y1: number;
+    x2: number;
+    y2: number;
+  } | null>(null);
+  const dragRef = useRef<{
+    x1: number;
+    y1: number;
+    x2: number;
+    y2: number;
+  } | null>(null);
   useEffect(() => {
     let cancelled = false,
       task: any;
     pdf
       .getPage(number)
       .then(async (p) => {
-      if (cancelled) return;
-      const viewport = p.getViewport({ scale });
-      setSize({ width: viewport.width, height: viewport.height });
+        if (cancelled) return;
+        const viewport = p.getViewport({ scale });
+        setSize({ width: viewport.width, height: viewport.height });
         const c = canvas.current;
         if (!c) return;
         const ratio = window.devicePixelRatio || 1;
@@ -96,20 +123,101 @@ function PdfPage({
     };
   }, [pdf, number, scale]);
   const select = () => {
-    if(captureMode)return;
+    if (captureMode) return;
     const s = window.getSelection()?.toString().replace(/\s+/g, " ").trim();
     if (s && s.length > 1) onSelect(s, number);
   };
-  const point=(e:React.PointerEvent<HTMLDivElement>)=>{const r=e.currentTarget.getBoundingClientRect();return{x:Math.max(0,Math.min(r.width,e.clientX-r.left)),y:Math.max(0,Math.min(r.height,e.clientY-r.top))}};
-  const finishCapture=(e:React.PointerEvent<HTMLDivElement>)=>{
-    const active=dragRef.current;if(!active||!canvas.current)return;const p=point(e),x=Math.min(active.x1,p.x),y=Math.min(active.y1,p.y),w=Math.abs(p.x-active.x1),h=Math.abs(p.y-active.y1);dragRef.current=null;setDrag(null);if(w<12||h<12)return;
-    const source=canvas.current,ratio=source.width/Math.max(1,source.getBoundingClientRect().width),out=document.createElement('canvas');out.width=Math.round(w*ratio);out.height=Math.round(h*ratio);out.getContext('2d')?.drawImage(source,Math.round(x*ratio),Math.round(y*ratio),out.width,out.height,0,0,out.width,out.height);onCapture({dataUrl:out.toDataURL('image/png'),page:number,width:out.width,height:out.height});
+  const point = (e: React.PointerEvent<HTMLDivElement>) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    return {
+      x: Math.max(0, Math.min(r.width, e.clientX - r.left)),
+      y: Math.max(0, Math.min(r.height, e.clientY - r.top)),
+    };
+  };
+  const finishCapture = (e: React.PointerEvent<HTMLDivElement>) => {
+    const active = dragRef.current;
+    if (!active || !canvas.current) return;
+    const p = point(e),
+      x = Math.min(active.x1, p.x),
+      y = Math.min(active.y1, p.y),
+      w = Math.abs(p.x - active.x1),
+      h = Math.abs(p.y - active.y1);
+    dragRef.current = null;
+    setDrag(null);
+    if (w < 12 || h < 12) return;
+    const source = canvas.current,
+      ratio = source.width / Math.max(1, source.getBoundingClientRect().width),
+      out = document.createElement("canvas");
+    out.width = Math.round(w * ratio);
+    out.height = Math.round(h * ratio);
+    out
+      .getContext("2d")
+      ?.drawImage(
+        source,
+        Math.round(x * ratio),
+        Math.round(y * ratio),
+        out.width,
+        out.height,
+        0,
+        0,
+        out.width,
+        out.height,
+      );
+    onCapture({
+      dataUrl: out.toDataURL("image/png"),
+      page: number,
+      width: out.width,
+      height: out.height,
+    });
   };
   return (
-    <div className="page-wrap" data-page={number} style={size} onMouseUp={select}>
+    <div
+      className="page-wrap"
+      data-page={number}
+      style={size}
+      onMouseUp={select}
+    >
       <canvas ref={canvas} />
       <div ref={layer} className="text-layer" />
-      {captureMode&&<div className="capture-layer" onPointerDown={e=>{e.currentTarget.setPointerCapture(e.pointerId);const p=point(e),next={x1:p.x,y1:p.y,x2:p.x,y2:p.y};dragRef.current=next;setDrag(next)}} onPointerMove={e=>{const active=dragRef.current;if(active){const p=point(e),next={...active,x2:p.x,y2:p.y};dragRef.current=next;setDrag(next)}}} onPointerUp={finishCapture} onPointerCancel={()=>{dragRef.current=null;setDrag(null)}}>{drag&&<div className="capture-box" style={{left:Math.min(drag.x1,drag.x2),top:Math.min(drag.y1,drag.y2),width:Math.abs(drag.x2-drag.x1),height:Math.abs(drag.y2-drag.y1)}}/>}<span>拖动框选公式或图片</span></div>}
+      {captureMode && (
+        <div
+          className="capture-layer"
+          onPointerDown={(e) => {
+            e.currentTarget.setPointerCapture(e.pointerId);
+            const p = point(e),
+              next = { x1: p.x, y1: p.y, x2: p.x, y2: p.y };
+            dragRef.current = next;
+            setDrag(next);
+          }}
+          onPointerMove={(e) => {
+            const active = dragRef.current;
+            if (active) {
+              const p = point(e),
+                next = { ...active, x2: p.x, y2: p.y };
+              dragRef.current = next;
+              setDrag(next);
+            }
+          }}
+          onPointerUp={finishCapture}
+          onPointerCancel={() => {
+            dragRef.current = null;
+            setDrag(null);
+          }}
+        >
+          {drag && (
+            <div
+              className="capture-box"
+              style={{
+                left: Math.min(drag.x1, drag.x2),
+                top: Math.min(drag.y1, drag.y2),
+                width: Math.abs(drag.x2 - drag.x1),
+                height: Math.abs(drag.y2 - drag.y1),
+              }}
+            />
+          )}
+          <span>拖动框选公式或图片</span>
+        </div>
+      )}
       <span className="page-number">{number}</span>
     </div>
   );
@@ -128,6 +236,7 @@ export function PdfViewer({
   onAddBookmark,
   onRemoveBookmark,
   onCapture,
+  onOcr,
 }: Props) {
   const [search, setSearch] = useState("");
   const [bookmarkName, setBookmarkName] = useState("");
@@ -151,7 +260,10 @@ export function PdfViewer({
         const box = scrollRef.current;
         if (!box) return;
         if (initialScrollTop > 0) box.scrollTop = initialScrollTop;
-        else box.querySelector(`[data-page="${page}"]`)?.scrollIntoView({ block: "start" });
+        else
+          box
+            .querySelector(`[data-page="${page}"]`)
+            ?.scrollIntoView({ block: "start" });
       });
       return () => cancelAnimationFrame(id);
     }
@@ -204,11 +316,40 @@ export function PdfViewer({
     ignoreNext.current = true;
     onPage(bookmark.page);
   };
+  const ocrCurrent = () => {
+    const canvas = scrollRef.current?.querySelector<HTMLCanvasElement>(
+      `[data-page="${page}"] canvas`,
+    );
+    if (canvas)
+      onOcr({
+        dataUrl: canvas.toDataURL("image/png"),
+        page,
+        width: canvas.width,
+        height: canvas.height,
+      });
+  };
   return (
     <section className="reader" aria-label="PDF 阅读区">
       <div className="pdf-toolbar">
         <div className="tool-group">
-          <button className={captureMode?'active-tool':''} aria-label={captureMode?'取消截图':'截图提问'} onClick={()=>{window.getSelection()?.removeAllRanges();setCaptureMode(v=>!v)}} title="框选公式或图片后向模型提问"><Camera/></button>
+          <button
+            className={captureMode ? "active-tool" : ""}
+            aria-label={captureMode ? "取消截图" : "截图提问"}
+            onClick={() => {
+              window.getSelection()?.removeAllRanges();
+              setCaptureMode((v) => !v);
+            }}
+            title="框选公式或图片后向模型提问"
+          >
+            <Camera />
+          </button>
+          <button
+            aria-label="对此页执行 OCR"
+            onClick={ocrCurrent}
+            title="仅在扫描页或文字层异常时使用"
+          >
+            <Scan />
+          </button>
           <button
             aria-label="上一页"
             disabled={page <= 1}
@@ -260,41 +401,83 @@ export function PdfViewer({
       </div>
       <div className="reader-content">
         <aside className="bookmark-rail" aria-label="论文书签">
-          <div className="bookmark-heading"><BookmarkSimple weight="fill"/><strong>书签</strong></div>
-          <form onSubmit={(e) => { e.preventDefault(); addBookmark(); }}>
-            <input aria-label="书签名称" value={bookmarkName} onChange={(e) => setBookmarkName(e.target.value)} placeholder={`第 ${page} 页书签`} />
-            <button aria-label="添加书签" title="添加当前位置书签"><BookmarkSimple/>添加当前位置</button>
+          <div className="bookmark-heading">
+            <BookmarkSimple weight="fill" />
+            <strong>书签</strong>
+          </div>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              addBookmark();
+            }}
+          >
+            <input
+              aria-label="书签名称"
+              value={bookmarkName}
+              onChange={(e) => setBookmarkName(e.target.value)}
+              placeholder={`第 ${page} 页书签`}
+            />
+            <button aria-label="添加书签" title="添加当前位置书签">
+              <BookmarkSimple />
+              添加当前位置
+            </button>
           </form>
           <div className="bookmark-list">
-            {bookmarks.length ? bookmarks.map((b) => <div className="bookmark-item" key={b.id}>
-              <button className="bookmark-jump" onClick={() => jumpBookmark(b)} title={`跳转到第 ${b.page} 页`}><span>{b.name}</span><small>第 {b.page} 页</small></button>
-              <button className="bookmark-delete" aria-label={`删除书签 ${b.name}`} onClick={() => onRemoveBookmark(b.id)}><Trash/></button>
-            </div>) : <p>还没有书签</p>}
+            {bookmarks.length ? (
+              bookmarks.map((b) => (
+                <div className="bookmark-item" key={b.id}>
+                  <button
+                    className="bookmark-jump"
+                    onClick={() => jumpBookmark(b)}
+                    title={`跳转到第 ${b.page} 页`}
+                  >
+                    <span>{b.name}</span>
+                    <small>第 {b.page} 页</small>
+                  </button>
+                  <button
+                    className="bookmark-delete"
+                    aria-label={`删除书签 ${b.name}`}
+                    onClick={() => onRemoveBookmark(b.id)}
+                  >
+                    <Trash />
+                  </button>
+                </div>
+              ))
+            ) : (
+              <p>还没有书签</p>
+            )}
           </div>
         </aside>
-        <div ref={scrollRef} className="pdf-scroll continuous" onScroll={handleScroll}>
-        {pdf ? (
-          Array.from({ length: pdf.numPages }, (_, i) => (
-            <PdfPage
-              key={i + 1}
-              pdf={pdf}
-              number={i + 1}
-              scale={scale}
-              onSelect={onSelect}
-              captureMode={captureMode}
-              onCapture={(capture)=>{setCaptureMode(false);onCapture(capture)}}
-            />
-          ))
-        ) : (
-          <div className="empty-reader">
-            <div className="paper-mark">P</div>
-            <h2>把论文放到阅读桌上</h2>
-            <p>
-              导入 PDF 或 Word 后，PaperTutor
-              会先建立章节、段落和句子索引，再开始模型预读。
-            </p>
-          </div>
-        )}
+        <div
+          ref={scrollRef}
+          className="pdf-scroll continuous"
+          onScroll={handleScroll}
+        >
+          {pdf ? (
+            Array.from({ length: pdf.numPages }, (_, i) => (
+              <PdfPage
+                key={i + 1}
+                pdf={pdf}
+                number={i + 1}
+                scale={scale}
+                onSelect={onSelect}
+                captureMode={captureMode}
+                onCapture={(capture) => {
+                  setCaptureMode(false);
+                  onCapture(capture);
+                }}
+              />
+            ))
+          ) : (
+            <div className="empty-reader">
+              <div className="paper-mark">P</div>
+              <h2>把论文放到阅读桌上</h2>
+              <p>
+                导入 PDF 或 Word 后，PaperTutor
+                会先建立章节、段落和句子索引，再开始模型预读。
+              </p>
+            </div>
+          )}
         </div>
       </div>
     </section>

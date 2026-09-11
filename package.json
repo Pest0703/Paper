@@ -1,6 +1,6 @@
 {
   "name": "papertutor",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "AI academic paper reading companion",
   "main": "dist-electron/main.js",
   "type": "module",

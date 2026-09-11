@@ -1,28 +1,325 @@
-import { useState } from 'react';
-import { ArrowLeft, CheckCircle, Eye, EyeSlash, Image, SpinnerGap, TextT } from '@phosphor-icons/react';
-import type { Settings as SettingsType } from './types';
-
-const providerUrls:Record<string,string>={DeepSeek:'https://api.deepseek.com',OpenAI:'https://api.openai.com/v1'};
-const pixel='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLkWQAAAABJRU5ErkJggg==';
-const messages:Record<string,string>={testing:'正在连接…',success:'连接成功。',auth:'认证失败，请检查 API Key。',model:'模型不存在，请核对模型名称。',timeout:'请求超时。',rate:'请求频率或额度受限。',server:'模型服务暂时异常。',vision:'该模型不支持图片输入。',network:'网络或 OpenAI-compatible 接口异常。',missing:'请先填写对应模型。'};
-
-export function Settings({settings,apiKey,onSave,onBack}:{settings:SettingsType;apiKey:string;onSave:(s:SettingsType,k:string)=>Promise<void>;onBack:()=>void}){
- const [form,setForm]=useState(settings),[key,setKey]=useState(apiKey),[show,setShow]=useState(false),[textState,setTextState]=useState(''),[visionState,setVisionState]=useState('');
- const setProvider=(provider:string)=>setForm({...form,provider,...(providerUrls[provider]?{baseUrl:providerUrls[provider]}:{})});
- const testText=async()=>{if(!form.textModel.trim()){setTextState('missing');return}setTextState('testing');const r=await window.paperTutor.llmRequest({id:crypto.randomUUID(),route:'TEXT',baseUrl:form.baseUrl,model:form.textModel,apiKey:key,messages:[{role:'user',content:'请只回复：连接成功'}],temperature:0,maxTokens:12,stream:false,timeout:form.timeout});setTextState(r.ok?'success':r.code||'network')};
- const testVision=async()=>{if(!form.visionModel.trim()){setVisionState('missing');return}setVisionState('testing');const r=await window.paperTutor.llmRequest({id:crypto.randomUUID(),route:'VISION',baseUrl:form.baseUrl,model:form.visionModel,apiKey:key,messages:[{role:'user',content:[{type:'text',text:'请只回复：图片连接成功'},{type:'image_url',image_url:{url:pixel,detail:'low'}}]}],temperature:0,maxTokens:16,stream:false,timeout:form.timeout});setVisionState(r.ok?'success':r.code||'network')};
- const status=(state:string,model:string)=>state?`${model || '未配置'}：${messages[state]}`:'';
- return <main className="settings-page">
-  <header><button className="back" onClick={onBack}><ArrowLeft/>返回阅读</button><div><p className="eyebrow">偏好设置</p><h1>AI 模型</h1><p>文字与图片共享服务凭据，但使用两套完全独立的模型名称。</p></div></header>
-  <div className="settings-grid"><section className="settings-form">
-   <label>服务商<select value={form.provider} onChange={e=>setProvider(e.target.value)}><option value="DeepSeek">DeepSeek</option><option value="OpenAI">OpenAI</option><option value="Custom OpenAI Compatible">自定义（OpenAI Compatible）</option></select><small>自定义服务可自由填写 Base URL；接口需兼容 OpenAI Chat Completions。</small></label>
-   <label>API Base URL<input value={form.baseUrl} placeholder="https://example.com/v1" onChange={e=>setForm({...form,baseUrl:e.target.value})}/></label>
-   <label>API Key<div className="secret"><input type={show?'text':'password'} value={key} placeholder="sk-…" onChange={e=>setKey(e.target.value)}/><button type="button" onClick={()=>setShow(!show)} aria-label="显示或隐藏密钥">{show?<EyeSlash/>:<Eye/>}</button></div><small>两种模型共用此 Key；使用系统安全存储，不写入程序包或日志。</small></label>
-   <div className="model-route-card"><label><span><TextT/>文字模型</span><input aria-label="文字模型" value={form.textModel} placeholder="用户填写的文字模型 ID" onChange={e=>setForm({...form,textModel:e.target.value})}/><small>用于论文文字、选中句段、总结、翻译和普通问答。</small></label><button type="button" onClick={testText} disabled={!key||textState==='testing'}>{textState==='testing'?<SpinnerGap className="spin"/>:<CheckCircle/>}测试文字模型</button>{textState&&<div className={`connection ${textState}`}>{status(textState,form.textModel)}</div>}</div>
-   <div className="model-route-card"><label><span><Image/>图片理解模型</span><input aria-label="图片理解模型" value={form.visionModel} placeholder="用户填写的视觉模型 ID" onChange={e=>setForm({...form,visionModel:e.target.value})}/><small>用于公式截图、Figure、流程图、表格和其他视觉内容。</small></label><button type="button" onClick={testVision} disabled={!key||visionState==='testing'}>{visionState==='testing'?<SpinnerGap className="spin"/>:<CheckCircle/>}测试图片模型</button>{visionState&&<div className={`connection ${visionState}`}>{status(visionState,form.visionModel)}</div>}</div>
-   <div className="two"><label>Temperature<input type="number" min="0" max="2" step="0.1" value={form.temperature} onChange={e=>setForm({...form,temperature:+e.target.value})}/></label><label>Max Tokens<input type="number" min="256" max="16000" value={form.maxTokens} onChange={e=>setForm({...form,maxTokens:+e.target.value})}/></label></div>
-   <div className="two"><label>请求超时（毫秒）<input type="number" value={form.timeout} onChange={e=>setForm({...form,timeout:+e.target.value})}/></label><label className="toggle"><input type="checkbox" checked={form.streaming} onChange={e=>setForm({...form,streaming:e.target.checked})}/><span>启用流式输出</span></label></div>
-   <div className="actions"><button className="primary" onClick={()=>onSave(form,key)} disabled={!form.baseUrl.trim()||!form.textModel.trim()}>保存设置</button></div>
-  </section><aside><h2>模型路由</h2><p>纯文字请求只使用文字模型；包含截图像素的请求只使用图片理解模型。图片模型为空时不会回退到文字模型。</p><dl><div><dt>共享</dt><dd>Provider、Base URL、API Key</dd></div><div><dt>独立</dt><dd>文字模型、图片理解模型、消息与错误提示</dd></div><div><dt>自定义接口</dt><dd>POST /chat/completions</dd></div><div><dt>日志</dt><dd>只记录路由和模型，不记录正文、图片或 Key</dd></div></dl></aside></div>
- </main>;
+import { useEffect, useState } from "react";
+import {
+  ArrowLeft,
+  CheckCircle,
+  Eye,
+  EyeSlash,
+  SpinnerGap,
+  Trash,
+} from "@phosphor-icons/react";
+import type { ApiSecrets, Settings as SettingsType } from "./types";
+const pixel =
+    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLkWQAAAABJRU5ErkJggg==",
+  msg: Record<string, string> = {
+    testing: "正在连接…",
+    success: "连接成功",
+    auth: "认证失败",
+    model: "模型不存在",
+    timeout: "请求超时",
+    rate: "额度或频率受限",
+    server: "服务异常",
+    vision: "不支持图片输入",
+    network: "网络或接口异常",
+    missing: "配置不完整",
+  };
+type Route = "TEXT" | "VISION" | "OCR";
+export function Settings({
+  settings,
+  apiKeys,
+  onSave,
+  onBack,
+  onClearCaches,
+}: {
+  settings: SettingsType;
+  apiKeys: ApiSecrets;
+  onSave: (s: SettingsType, k: ApiSecrets) => Promise<void>;
+  onBack: () => void;
+  onClearCaches: (selected: string[]) => Promise<any>;
+}) {
+  const [form, setForm] = useState(settings),
+    [keys, setKeys] = useState(apiKeys),
+    [show, setShow] = useState<Record<string, boolean>>({}),
+    [states, setStates] = useState<Record<string, string>>({}),
+    [cache, setCache] = useState<any>({}),
+    [confirm, setConfirm] = useState(false),
+    [result, setResult] = useState("");
+  useEffect(() => {
+    window.paperTutor.cacheInfo().then(setCache);
+  }, []);
+  const set = (x: Partial<SettingsType>) => setForm({ ...form, ...x });
+  const test = async (route: Route) => {
+    const baseUrl =
+        route === "TEXT"
+          ? form.textBaseUrl
+          : route === "VISION"
+            ? form.visionBaseUrl
+            : form.ocrBaseUrl,
+      model =
+        route === "TEXT"
+          ? form.textModel
+          : route === "VISION"
+            ? form.visionModel
+            : form.ocrModel,
+      key = keys[route.toLowerCase() as keyof ApiSecrets];
+    if (!baseUrl || !model || !key) {
+      setStates({ ...states, [route]: "missing" });
+      return;
+    }
+    setStates({ ...states, [route]: "testing" });
+    const image =
+      route === "TEXT"
+        ? undefined
+        : [
+            {
+              type: "text",
+              text:
+                route === "OCR"
+                  ? "识别图片文字，只输出识别结果。"
+                  : "请只回复图片连接成功",
+            },
+            { type: "image_url", image_url: { url: pixel, detail: "low" } },
+          ];
+    const r = await window.paperTutor.llmRequest({
+      id: crypto.randomUUID(),
+      route,
+      baseUrl,
+      model,
+      apiKey: key,
+      messages: [{ role: "user", content: image || "请只回复连接成功" }],
+      temperature: 0,
+      maxTokens: 20,
+      stream: false,
+      timeout: form.timeout,
+    });
+    setStates((s) => ({
+      ...s,
+      [route]: r.ok ? "success" : r.code || "network",
+    }));
+  };
+  return (
+    <main className="settings-page">
+      <header>
+        <button className="back" onClick={onBack}>
+          <ArrowLeft />
+          返回阅读
+        </button>
+        <div>
+          <p className="eyebrow">偏好设置</p>
+          <h1>模型与存储</h1>
+          <p>
+            TEXT、VISION、OCR 使用三套完全独立的 URL、Key 和模型，不会互相回退。
+          </p>
+        </div>
+      </header>
+      <div className="settings-grid">
+        <section className="settings-form">
+          <ApiCard
+            title="文本模型"
+            route="TEXT"
+            url={form.textBaseUrl}
+            model={form.textModel}
+            secret={keys.text}
+            show={show.TEXT}
+            state={states.TEXT}
+            onUrl={(v: string) => set({ textBaseUrl: v })}
+            onModel={(v: string) => set({ textModel: v })}
+            onKey={(v: string) => setKeys({ ...keys, text: v })}
+            onShow={() => setShow({ ...show, TEXT: !show.TEXT })}
+            onTest={() => test("TEXT")}
+          />
+          <ApiCard
+            title="视觉模型"
+            route="VISION"
+            url={form.visionBaseUrl}
+            model={form.visionModel}
+            secret={keys.vision}
+            show={show.VISION}
+            state={states.VISION}
+            onUrl={(v: string) => set({ visionBaseUrl: v })}
+            onModel={(v: string) => set({ visionModel: v })}
+            onKey={(v: string) => setKeys({ ...keys, vision: v })}
+            onShow={() => setShow({ ...show, VISION: !show.VISION })}
+            onTest={() => test("VISION")}
+          />
+          <div className="api-config-card">
+            <h2>OCR</h2>
+            <label>
+              模式
+              <select
+                aria-label="OCR 模式"
+                value={form.ocrMode}
+                onChange={(e) => set({ ocrMode: e.target.value as any })}
+              >
+                <option value="disabled">关闭</option>
+                <option value="api">API</option>
+              </select>
+            </label>
+            {form.ocrMode === "api" && (
+              <ApiFields
+                route="OCR"
+                url={form.ocrBaseUrl}
+                model={form.ocrModel}
+                secret={keys.ocr}
+                show={show.OCR}
+                state={states.OCR}
+                onUrl={(v: string) => set({ ocrBaseUrl: v })}
+                onModel={(v: string) => set({ ocrModel: v })}
+                onKey={(v: string) => setKeys({ ...keys, ocr: v })}
+                onShow={() => setShow({ ...show, OCR: !show.OCR })}
+                onTest={() => test("OCR")}
+              />
+            )}
+          </div>
+          <div className="two">
+            <label>
+              Temperature
+              <input
+                type="number"
+                min="0"
+                max="2"
+                step=".1"
+                value={form.temperature}
+                onChange={(e) => set({ temperature: +e.target.value })}
+              />
+            </label>
+            <label>
+              Max Tokens
+              <input
+                type="number"
+                min="256"
+                max="16000"
+                value={form.maxTokens}
+                onChange={(e) => set({ maxTokens: +e.target.value })}
+              />
+            </label>
+          </div>
+          <div className="actions">
+            <button className="primary" onClick={() => onSave(form, keys)}>
+              保存设置
+            </button>
+          </div>
+          <div className="cache-card">
+            <h2>缓存管理</h2>
+            <p>
+              AI 回答：{fmt(cache.aiBytes || 0)}　OCR：
+              {fmt(cache.ocrBytes || 0)}　文档转换：
+              {fmt(cache.conversionBytes || 0)}
+            </p>
+            <p>
+              只清理可重新生成的数据，不删除论文、进度、书签、模型设置或密钥。
+            </p>
+            <button className="danger" onClick={() => setConfirm(true)}>
+              <Trash />
+              清除全部安全缓存
+            </button>
+            {result && <div className="connection success">{result}</div>}
+          </div>
+        </section>
+        <aside>
+          <h2>三路隔离</h2>
+          <p>
+            每个测试按钮和业务入口只读取自己的配置。OCR
+            仅在用户主动对当前页执行时调用，不会自动整篇识别。
+          </p>
+        </aside>
+      </div>
+      {confirm && (
+        <div className="confirm-modal">
+          <section>
+            <h2>确认清除缓存？</h2>
+            <p>
+              将删除 AI 回答、OCR 结果和未占用的 Word
+              转换缓存。不会删除论文、阅读进度、书签、API 设置或安全密钥。
+            </p>
+            <div>
+              <button onClick={() => setConfirm(false)}>取消</button>
+              <button
+                className="danger"
+                onClick={async () => {
+                  const r = await onClearCaches([
+                    "ai",
+                    "ocr",
+                    "conversion",
+                    "temp",
+                  ]);
+                  setResult(
+                    `缓存已清除，释放 ${fmt(r.freedBytes || 0)}${r.failed?.length ? `；${r.failed.length} 项因占用未清理` : ""}`,
+                  );
+                  setConfirm(false);
+                  setCache(await window.paperTutor.cacheInfo());
+                }}
+              >
+                确认清除
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
+    </main>
+  );
 }
+function ApiCard(p: any) {
+  return (
+    <div className="api-config-card">
+      <h2>{p.title}</h2>
+      <ApiFields {...p} />
+    </div>
+  );
+}
+function ApiFields(p: any) {
+  return (
+    <>
+      <label>
+        API URL
+        <input
+          aria-label={`${p.route} API URL`}
+          value={p.url}
+          onChange={(e) => p.onUrl(e.target.value)}
+        />
+      </label>
+      <label>
+        API Key
+        <div className="secret">
+          <input
+            aria-label={`${p.route} API Key`}
+            type={p.show ? "text" : "password"}
+            value={p.secret}
+            onChange={(e) => p.onKey(e.target.value)}
+          />
+          <button onClick={p.onShow} aria-label={`显示或隐藏 ${p.route} Key`}>
+            {p.show ? <EyeSlash /> : <Eye />}
+          </button>
+        </div>
+      </label>
+      <label>
+        模型名称
+        <input
+          aria-label={`${p.route} 模型`}
+          value={p.model}
+          onChange={(e) => p.onModel(e.target.value)}
+        />
+      </label>
+      <button
+        className="test-route"
+        onClick={p.onTest}
+        disabled={p.state === "testing"}
+      >
+        {p.state === "testing" ? (
+          <SpinnerGap className="spin" />
+        ) : (
+          <CheckCircle />
+        )}
+        测试 {p.route}
+      </button>
+      {p.state && (
+        <div className={`connection ${p.state}`}>
+          {p.model}：{msg[p.state]}
+        </div>
+      )}
+    </>
+  );
+}
+const fmt = (n: number) =>
+  n > 1048576
+    ? `${(n / 1048576).toFixed(1)} MB`
+    : `${(n / 1024).toFixed(1)} KB`;

@@ -1,7 +1,7 @@
 import type {ContextSource,PromptRequest} from './promptEngine';
 import {estimateCost} from './pricing';
 
-export type AiCallType='TEXT'|'VISION';
+export type AiCallType='TEXT'|'VISION'|'OCR';
 export type AiUsage={inputTokens?:number;outputTokens?:number;totalTokens?:number};
 export type ContextSection={name:string;content:string;sourceType:string;reason?:string;page?:number;section?:string;paragraphId?:string;score?:number};
 export type RequestContextSnapshot={requestId:string;callType:AiCallType;model:string;taskType:string;selection:string;userQuestion?:string;conversationState?:string;sections:ContextSection[];finalMessages:unknown[];image?:{attached:true;mime:string;width?:number;height?:number;page?:number}};
