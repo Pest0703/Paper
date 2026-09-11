@@ -1,0 +1,3 @@
+import{describe,expect,it}from'vitest';
+import{parseStreamData}from'../../electron/streamParser';
+describe('streaming usage',()=>{it('keeps usage from the final chunk',()=>{const chunks=['{"choices":[{"delta":{"content":"你"}}]}','{"choices":[{"delta":{"content":"好"}}]}','{"choices":[],"usage":{"prompt_tokens":8,"completion_tokens":2,"total_tokens":10}}'];let usage;let text='';for(const chunk of chunks){const x=parseStreamData(chunk);text+=x?.token||'';usage=x?.usage||usage}expect(text).toBe('你好');expect(usage).toEqual({prompt_tokens:8,completion_tokens:2,total_tokens:10})});it('does not fabricate usage',()=>expect(parseStreamData('{"choices":[{"delta":{"content":"x"}}]}')?.usage).toBeUndefined())});

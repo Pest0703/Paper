@@ -27,6 +27,9 @@ PaperTutor 是一个面向研究生的 Windows 桌面论文精读工具。它支
 - 首次导入模型预读，论文档案、阅读页码与缩放状态持久化，重启不重复解析
 - Overview、模型设置、连接测试、长回答独立滚动、小窗口导师抽屉
 - 导师回答与追问内容更新时自动跟随到最新回答，无需手动滚动到底部
+- 每个 AI 回答可展开查看实际模型、TEXT/VISION、Token、总耗时、首字延迟、本地缓存、服务商缓存与估算费用
+- 每个回答绑定自己的请求上下文快照，可核查选区、相邻段落、章节摘要、检索结果、阅读状态、问题和实际 messages
+- 视觉上下文只保存图片 MIME、尺寸和页码；Base64、API Key 与认证信息不会进入查看器或复制内容
 
 ## 架构
 
@@ -36,6 +39,9 @@ src/PdfViewer.tsx      PDF 渲染与文本选择
 src/services/parser.ts PDF 层级解析
 src/services/context.ts 检索与上下文预算入口
 src/TutorPanel.tsx     流式导师对话
+src/AiCallDetails.tsx  单次调用详情与上下文查看器
+src/services/aiObservability.ts 请求元数据、快照与安全清洗
+src/services/pricing.ts 模型基础公开单价与费用估算
 src/Settings.tsx       Provider 配置与连接测试
 tests/                 Electron UI 测试
 ```
@@ -86,6 +92,8 @@ npm run test:ui
 ```
 
 UI 测试覆盖启动、800×600 至 2560×1440 的七种尺寸、设置页、真实 PDF 导入与应用重启恢复。模型连接使用设置页的真实连接测试；项目不把 Mock 回答视为模型验收。
+
+费用始终标为“估算费用”。当前价格表包含 `qwen3.7-plus` 和 `qwen3.8-max` 的基础公开 CNY 单价，不模拟免费额度、限时优惠、Token Plan、缓存折扣或节省计划；未知模型显示“未配置”。
 
 ## 当前限制
 

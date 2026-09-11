@@ -2,6 +2,17 @@
 
 本报告记录实际执行结果，而非功能清单。测试环境：Windows，Electron 37，Node.js 24。
 
+## AI 调用可观测性与上下文查看器
+
+- 单次回答显示真实请求模型、TEXT/VISION、输入/输出/总 Token、总耗时、可用时的首字延迟、本地缓存和服务商缓存。
+- Streaming 请求发送 `stream_options.include_usage=true`，最终 usage chunk 会合并到请求结果；服务商未返回 usage 时显示“不可用”，不会伪装成 0。
+- `qwen3.7-plus` 按基础公开原价 2/8 元每百万输入/输出 Token，`qwen3.8-max` 按 12/36 元估算；未知模型不估价。
+- 快照在最终 messages 构造完成、IPC 调用前生成，并通过 requestId 与对应回答绑定；连续问题不会互相覆盖。
+- 视觉快照只保留已附加、image/png、像素尺寸和页码，最终 messages 中的 Base64 被替换为安全说明。
+- 复制功能复用同一安全清洗器，过滤 API Key、Authorization、Cookie、密码、Secret、访问令牌和 Bearer 内容。
+- 长内容默认折叠，单块最多渲染 12,000 字符，查看器使用独立滚动容器。
+- 新增测试后单元测试为 41/41；Electron UI 为 2 项通过、1 项因仓库不包含测试论文而跳过；生产构建通过。
+
 ## 自动检查范围
 
 - TypeScript 与生产构建
