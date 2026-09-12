@@ -6,6 +6,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import Store from "electron-store";
 import { parseStreamData } from "./streamParser.js";
+import { classifyApiError, sanitizeApiErrorDetail } from "./apiErrors.js";
 
 type AppState = {
   library?: unknown[];
@@ -377,19 +378,14 @@ ipcMain.handle("llm-request", async (_e, payload: any) => {
     const code =
       error.name === "AbortError"
         ? "timeout"
-        : status === 401
-          ? "auth"
-          : status === 404
-            ? "model"
-            : status === 429
-              ? "rate"
-              : status === 400 &&
-                  /image|vision|multimodal/i.test(String(error.message))
-                ? "vision"
-                : status >= 500
-                  ? "server"
-                  : "network";
-    return { ok: false, route, model, code, message: error.message };
+        : classifyApiError(status, error.message);
+    return {
+      ok: false,
+      route,
+      model,
+      code,
+      message: sanitizeApiErrorDetail(error.message),
+    };
   } finally {
     clearTimeout(timer);
     controllers.delete(id);

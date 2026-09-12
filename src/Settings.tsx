@@ -8,20 +8,29 @@ import {
   Trash,
 } from "@phosphor-icons/react";
 import type { ApiSecrets, Settings as SettingsType } from "./types";
-const pixel =
-    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLkWQAAAABJRU5ErkJggg==",
-  msg: Record<string, string> = {
-    testing: "正在连接…",
-    success: "连接成功",
-    auth: "认证失败",
-    model: "模型不存在",
-    timeout: "请求超时",
-    rate: "额度或频率受限",
-    server: "服务异常",
-    vision: "不支持图片输入",
-    network: "网络或接口异常",
-    missing: "配置不完整",
-  };
+import { createVisualProbe, visualProbePassed } from "./services/apiProbe";
+const msg: Record<string, string> = {
+  testing: "正在连接…",
+  success: "连接成功",
+  success_vision: "视觉能力测试通过",
+  success_ocr: "OCR 测试通过",
+  unverified_vision: "接口连接成功，但未能确认图片理解能力",
+  unverified_ocr: "接口连接成功，但未能确认文字识别能力",
+  image_generation: "无法生成视觉测试图片",
+  auth: "认证失败",
+  model: "模型不存在",
+  timeout: "请求超时",
+  rate: "额度或频率受限",
+  server: "服务异常",
+  vision_unsupported: "模型明确不支持图片输入",
+  image_invalid: "测试图片无效或无法解析",
+  image_size: "测试图片尺寸不符合接口要求",
+  image_format: "测试图片格式不受支持",
+  bad_request: "请求参数错误",
+  empty: "接口未返回正文",
+  network: "网络或接口异常",
+  missing: "配置不完整",
+};
 type Route = "TEXT" | "VISION" | "OCR";
 export function Settings({
   settings,
@@ -40,6 +49,7 @@ export function Settings({
     [keys, setKeys] = useState(apiKeys),
     [show, setShow] = useState<Record<string, boolean>>({}),
     [states, setStates] = useState<Record<string, string>>({}),
+    [details, setDetails] = useState<Record<string, string>>({}),
     [cache, setCache] = useState<any>({}),
     [confirm, setConfirm] = useState(false),
     [result, setResult] = useState("");
@@ -65,36 +75,52 @@ export function Settings({
       setStates({ ...states, [route]: "missing" });
       return;
     }
-    setStates({ ...states, [route]: "testing" });
-    const image =
-      route === "TEXT"
-        ? undefined
-        : [
-            {
-              type: "text",
-              text:
-                route === "OCR"
-                  ? "识别图片文字，只输出识别结果。"
-                  : "请只回复图片连接成功",
-            },
-            { type: "image_url", image_url: { url: pixel, detail: "low" } },
-          ];
+    setStates((current) => ({ ...current, [route]: "testing" }));
+    setDetails((current) => ({ ...current, [route]: "" }));
+    let probe: ReturnType<typeof createVisualProbe> | undefined;
+    try {
+      probe = route === "TEXT" ? undefined : createVisualProbe(route);
+    } catch {
+      setStates((current) => ({ ...current, [route]: "image_generation" }));
+      return;
+    }
+    const content = probe
+      ? [
+          { type: "text", text: probe.prompt },
+          {
+            type: "image_url",
+            image_url: { url: probe.dataUrl, detail: "low" },
+          },
+        ]
+      : "请只回复连接成功";
     const r = await window.paperTutor.llmRequest({
       id: crypto.randomUUID(),
       route,
       baseUrl,
       model,
       apiKey: key,
-      messages: [{ role: "user", content: image || "请只回复连接成功" }],
+      messages: [{ role: "user", content }],
       temperature: 0,
       maxTokens: 20,
       stream: false,
       timeout: form.timeout,
     });
-    setStates((s) => ({
-      ...s,
-      [route]: r.ok ? "success" : r.code || "network",
+    const successCode =
+      route === "TEXT"
+        ? "success"
+        : visualProbePassed(probe!, r.text)
+          ? route === "VISION"
+            ? "success_vision"
+            : "success_ocr"
+          : route === "VISION"
+            ? "unverified_vision"
+            : "unverified_ocr";
+    setStates((current) => ({
+      ...current,
+      [route]: r.ok ? successCode : r.code || "network",
     }));
+    if (!r.ok && r.message)
+      setDetails((current) => ({ ...current, [route]: String(r.message) }));
   };
   return (
     <main className="settings-page">
@@ -121,6 +147,7 @@ export function Settings({
             secret={keys.text}
             show={show.TEXT}
             state={states.TEXT}
+            detail={details.TEXT}
             onUrl={(v: string) => set({ textBaseUrl: v })}
             onModel={(v: string) => set({ textModel: v })}
             onKey={(v: string) => setKeys({ ...keys, text: v })}
@@ -135,6 +162,7 @@ export function Settings({
             secret={keys.vision}
             show={show.VISION}
             state={states.VISION}
+            detail={details.VISION}
             onUrl={(v: string) => set({ visionBaseUrl: v })}
             onModel={(v: string) => set({ visionModel: v })}
             onKey={(v: string) => setKeys({ ...keys, vision: v })}
@@ -162,6 +190,7 @@ export function Settings({
                 secret={keys.ocr}
                 show={show.OCR}
                 state={states.OCR}
+                detail={details.OCR}
                 onUrl={(v: string) => set({ ocrBaseUrl: v })}
                 onModel={(v: string) => set({ ocrModel: v })}
                 onKey={(v: string) => setKeys({ ...keys, ocr: v })}
@@ -313,7 +342,10 @@ function ApiFields(p: any) {
       </button>
       {p.state && (
         <div className={`connection ${p.state}`}>
-          {p.model}：{msg[p.state]}
+          <div>
+            {p.model}：{msg[p.state] || msg.network}
+          </div>
+          {p.detail && <small>服务端返回：{p.detail}</small>}
         </div>
       )}
     </>

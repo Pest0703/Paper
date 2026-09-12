@@ -2,6 +2,15 @@
 
 本报告记录实际执行结果，而非功能清单。测试环境：Windows，Electron 37，Node.js 24。
 
+## Vision / OCR 设置页能力探测修复
+
+- 根因：旧测试使用 1×1 PNG，部分多模态后端会将其作为无效图片拒绝；旧错误分类又把所有包含 image/vision/multimodal 的 HTTP 400 统一误报为“不支持图片输入”。
+- 新测试在内存 Canvas 中生成 320×200 匿名 PNG：VISION 图包含 `VISION TEST / 123`，OCR 图包含 `OCR TEST / 456`，不落盘、不持久化、不记录 Base64。
+- VISION 只有在 HTTP 成功、正文非空且包含 `123` 时显示“视觉能力测试通过”；OCR 独立要求返回包含 `456`。仅连接成功但未识别预期内容时显示“未能确认能力”。
+- HTTP 400 现区分 `vision_unsupported`、`image_invalid`、`image_size`、`image_format`、`bad_request`；详细错误在主进程脱敏后才返回设置页。
+- 当前用户配置下真实低成本探测各执行一次：`qwen3.8-flash：视觉能力测试通过`；`qwen3.8-flash：OCR 测试通过`。
+- 单元测试 51/51 通过，Electron UI 2 项通过、1 项因无仓库论文样本跳过，Production Build 通过。真实截图和论文 OCR 业务代码未修改。
+
 ## 0.2.1 Beta 三路 API、OCR 与缓存治理
 
 - TEXT、VISION、OCR 均有独立 URL、API Key、Model、安全存储槽和测试入口；凭据选择单元测试验证三路不串用，缺失配置时不回退。

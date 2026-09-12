@@ -39,6 +39,9 @@
   "build": {
     "appId": "ai.papertutor.desktop",
     "productName": "PaperTutor",
+    "directories": {
+      "output": "release"
+    },
     "files": [
       "dist/**/*",
       "dist-electron/**/*",
