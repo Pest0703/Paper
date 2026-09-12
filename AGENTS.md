@@ -14,3 +14,7 @@
 12. If a possible secret or private identifier is found, stop pushing and sanitize it first.
 13. Apply these rules regardless of repository visibility.
 14. Treat every commit as potentially public.
+
+## Versioning
+
+Every bug fix or feature change must increment the application version and update the visible version documentation. Never reuse a previously delivered version number.

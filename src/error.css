@@ -734,6 +734,122 @@
   font-size: 11px;
   line-height: 1.6;
 }
+.library-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  justify-content: flex-end;
+  background: rgba(22, 31, 29, 0.34);
+  backdrop-filter: blur(2px);
+}
+.paper-library {
+  width: min(460px, 94vw);
+  height: 100%;
+  padding: 24px;
+  overflow: auto;
+  background: var(--paper);
+  box-shadow: -18px 0 50px rgba(20, 33, 29, 0.18);
+}
+.paper-library > header,
+.library-actions,
+.library-search,
+.paper-library .library-list button span {
+  display: flex;
+  align-items: center;
+}
+.paper-library > header {
+  justify-content: space-between;
+}
+.paper-library h2 {
+  margin: 3px 0 0;
+}
+.paper-library > header > button {
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: 10px;
+  background: #e8eeea;
+  cursor: pointer;
+}
+.library-actions {
+  gap: 10px;
+  margin: 24px 0 14px;
+}
+.library-actions button {
+  flex: 1;
+  display: flex;
+  gap: 7px;
+  align-items: center;
+  justify-content: center;
+  padding: 11px;
+  border: 1px solid #c9d4ce;
+  border-radius: 10px;
+  background: white;
+  color: #25342f;
+  font-weight: 650;
+  cursor: pointer;
+}
+.library-search {
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid #d5dcd7;
+  border-radius: 10px;
+  background: #f6f8f5;
+}
+.library-search input {
+  width: 100%;
+  border: 0;
+  outline: 0;
+  background: transparent;
+}
+.library-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 16px;
+}
+.paper-library .library-list > button {
+  padding: 14px;
+  border: 1px solid #dbe1dd;
+  border-radius: 11px;
+  background: white;
+  text-align: left;
+  cursor: pointer;
+}
+.paper-library .library-list > button.active {
+  border-color: var(--accent);
+  box-shadow: inset 3px 0 var(--accent);
+}
+.paper-library .library-list strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.paper-library .library-list button span {
+  justify-content: space-between;
+  margin-top: 8px;
+  color: var(--muted);
+}
+.paper-library .library-list i {
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: #e7efeb;
+  color: #486158;
+  font-size: 10px;
+  font-style: normal;
+}
+.library-empty {
+  display: grid;
+  justify-items: center;
+  gap: 7px;
+  padding: 56px 20px;
+  color: var(--muted);
+  text-align: center;
+}
+.library-empty svg {
+  font-size: 42px;
+}
 .ocr-loader {
   width: 26px;
   height: 26px;

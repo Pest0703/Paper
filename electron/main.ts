@@ -127,6 +127,53 @@ ipcMain.handle("choose-pdf", async () => {
   });
   return result.canceled ? null : result.filePaths[0];
 });
+async function scanPaperFolder(root: string) {
+  const found: Array<{
+    path: string;
+    name: string;
+    size: number;
+    folderName: string;
+  }> = [];
+  async function visit(directory: string) {
+    if (found.length >= 2000) return;
+    let entries;
+    try {
+      entries = await fs.readdir(directory, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (found.length >= 2000) break;
+      const target = path.join(directory, entry.name);
+      if (entry.isDirectory()) await visit(target);
+      else if (entry.isFile() && /\.(pdf|doc|docx)$/i.test(entry.name)) {
+        try {
+          const stat = await fs.stat(target);
+          found.push({
+            path: target,
+            name: entry.name,
+            size: stat.size,
+            folderName: path.basename(path.dirname(target)),
+          });
+        } catch {}
+      }
+    }
+  }
+  await visit(root);
+  return found.sort((a, b) => a.name.localeCompare(b.name));
+}
+ipcMain.handle("choose-paper-folder", async () => {
+  const testFolder = app.commandLine.getSwitchValue("test-paper-folder");
+  const folder = testFolder
+    ? testFolder
+    : (
+        await dialog.showOpenDialog(win!, {
+          properties: ["openDirectory"],
+          title: "选择论文文件夹",
+        })
+      ).filePaths[0];
+  return folder ? scanPaperFolder(folder) : [];
+});
 ipcMain.handle("read-pdf", async (_e, filePath: string) => {
   const readablePath = await prepareReadableDocument(filePath),
     bytes = await fs.readFile(readablePath),

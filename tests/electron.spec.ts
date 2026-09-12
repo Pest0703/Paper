@@ -13,14 +13,10 @@ test("launches, adapts, and exposes three independent API sections", async () =>
     page.getByRole("button", { name: "PT PaperTutor" }),
   ).toBeVisible();
   await page.getByLabel("打开 OCR 文本页").click();
-  await expect(
-    page.getByRole("region", { name: "OCR 文本页" }),
-  ).toBeVisible();
+  await expect(page.getByRole("region", { name: "OCR 文本页" })).toBeVisible();
   await expect(page.getByText("未进行OCR")).toBeVisible();
   await page.getByLabel("关闭 OCR 文本页").click();
-  await expect(page.getByRole("region", { name: "OCR 文本页" })).toHaveCount(
-    0,
-  );
+  await expect(page.getByRole("region", { name: "OCR 文本页" })).toHaveCount(0);
   fs.mkdirSync("screenshots", { recursive: true });
   for (const [w, h] of [
     [800, 600],
@@ -49,6 +45,47 @@ test("launches, adapts, and exposes three independent API sections", async () =>
   await page.screenshot({ path: "screenshots/settings.png" });
   await app.close();
   fs.rmSync(profile, { recursive: true, force: true });
+});
+test("indexes a paper folder without parsing or model calls and restores it", async () => {
+  const profile = fs.mkdtempSync(path.join(os.tmpdir(), "papertutor-library-"));
+  const folder = fs.mkdtempSync(path.join(os.tmpdir(), "papertutor-papers-"));
+  fs.writeFileSync(path.join(folder, "alpha.pdf"), "metadata only");
+  fs.writeFileSync(path.join(folder, "beta.docx"), "metadata only");
+  fs.writeFileSync(path.join(folder, "ignored.txt"), "not a paper");
+  let app = await electron.launch({
+    args: [".", `--user-data-dir=${profile}`, `--test-paper-folder=${folder}`],
+    cwd: path.resolve("."),
+  });
+  let page = await app.firstWindow();
+  await page.getByLabel("打开论文目录").click();
+  await page.getByRole("button", { name: "导入文件夹" }).click();
+  await expect(page.getByText("alpha.pdf")).toBeVisible();
+  await expect(page.getByText("beta.docx")).toBeVisible();
+  await expect(page.getByText("ignored.txt")).toHaveCount(0);
+  await expect(page.getByText("未打开")).toHaveCount(2);
+  await app.close();
+
+  const statePath = path.join(profile, "papertutor-data.json");
+  const state = JSON.parse(fs.readFileSync(statePath, "utf8"));
+  expect(state.library).toHaveLength(2);
+  expect(state.library.every((item: any) => item.status === "indexed")).toBe(
+    true,
+  );
+  expect(
+    state.library.every((item: any) => item.profile.sections.length === 0),
+  ).toBe(true);
+  expect(state.lastPromptMetric).toBeUndefined();
+
+  app = await electron.launch({
+    args: [".", `--user-data-dir=${profile}`],
+    cwd: path.resolve("."),
+  });
+  page = await app.firstWindow();
+  await expect(page.getByText("alpha.pdf")).toBeVisible();
+  await expect(page.getByText("beta.docx")).toBeVisible();
+  await app.close();
+  fs.rmSync(profile, { recursive: true, force: true });
+  fs.rmSync(folder, { recursive: true, force: true });
 });
 test("imports a real PDF and preserves its local record after restart", async () => {
   const sample = path.resolve("test-assets/attention-is-all-you-need.pdf"),

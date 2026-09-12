@@ -16,6 +16,7 @@ import { PdfViewer } from "./PdfViewer";
 import { Settings } from "./Settings";
 import { TutorPanel, type Turn } from "./TutorPanel";
 import { OcrPanel } from "./OcrPanel";
+import { PaperLibrary } from "./PaperLibrary";
 import {
   ocrPagesFromProfile,
   upsertOcrPage,
@@ -45,6 +46,15 @@ import {
 import { credentialsFor } from "./services/apiClients";
 import { cacheClearPatch } from "./services/cachePolicy";
 import { OVERVIEW_SYSTEM_PROMPT } from "./prompts/overviewPrompt";
+import {
+  createIndexedPaper,
+  emptyPaperProfile,
+  mergePaperLibrary,
+} from "./services/paperLibrary";
+import {
+  applyOverviewTranslation,
+  parseOverviewResponse,
+} from "./services/overviewTranslation";
 import type {
   ApiSecrets,
   Bookmark,
@@ -93,6 +103,7 @@ export function App() {
   );
   const [panel, setPanel] = useState(true);
   const [ocrOpen, setOcrOpen] = useState(false);
+  const [libraryOpen, setLibraryOpen] = useState(false);
   const [ocrBusy, setOcrBusy] = useState(false);
   const [ocrPages, setOcrPages] = useState<OcrPageResult[]>([]);
   const [selected, setSelected] = useState("");
@@ -139,7 +150,16 @@ export function App() {
         const lib = (s.library || []) as PaperRecord[];
         setPapers(lib);
         const active = lib.find((p) => p.id === s.activePaperId) || lib[0];
-        if (active) await openRecord(active);
+        if (
+          active &&
+          active.status === "ready" &&
+          !active.profile.overviewTitle &&
+          k.text
+        )
+          await analyzePaper(active, loadedSettings, k, lib);
+        else if (active && active.status !== "indexed")
+          await openRecord(active);
+        else if (lib.length) setLibraryOpen(true);
         setHydrated(true);
       })
       .catch(() => {
@@ -161,6 +181,7 @@ export function App() {
       settings,
     });
   async function openRecord(rec: PaperRecord) {
+    if (rec.status === "indexed") return analyzePaper(rec);
     try {
       const f = await window.paperTutor.readPdf(rec.path);
       const doc = await pdfjs.getDocument({ data: new Uint8Array(f.bytes) })
@@ -176,6 +197,7 @@ export function App() {
       setPaper(restored);
       setOcrPages(ocrPagesFromProfile(restored.profile));
       setView("reader");
+      setLibraryOpen(false);
     } catch {
       setError("无法重新打开这篇论文，原文件可能已移动。");
     }
@@ -183,10 +205,46 @@ export function App() {
   async function importPdf() {
     const path = await window.paperTutor.choosePdf();
     if (!path) return;
+    const name = path.split(/[\\/]/).pop() || "论文";
+    const id = await sha(path);
+    await analyzePaper({
+      id,
+      name,
+      path,
+      size: 0,
+      fingerprint: id,
+      profile: emptyPaperProfile(name),
+      importedAt: new Date().toISOString(),
+      page: 1,
+      scale: 1.1,
+      scrollTop: 0,
+      bookmarks: [],
+      status: "indexed",
+    });
+  }
+  async function importPaperFolder() {
+    const files = await window.paperTutor.choosePaperFolder();
+    if (!files.length) return;
+    const discovered = await Promise.all(
+      files.map(async (file) =>
+        createIndexedPaper(file, await sha(`${file.path}:${file.size}`)),
+      ),
+    );
+    const next = mergePaperLibrary(papers, discovered);
+    setPapers(next);
+    await window.paperTutor.saveState({ library: next, settings });
+    setLibraryOpen(true);
+  }
+  async function analyzePaper(
+    seed: PaperRecord,
+    runtimeSettings = settings,
+    runtimeKeys = keys,
+    library = papers,
+  ) {
     setProgress({ n: 3, msg: "正在读取论文文件" });
     setError("");
     try {
-      const f = await window.paperTutor.readPdf(path);
+      const f = await window.paperTutor.readPdf(seed.path);
       const doc = await pdfjs.getDocument({ data: new Uint8Array(f.bytes) })
         .promise;
       setPdf(doc);
@@ -195,24 +253,21 @@ export function App() {
       );
       const id = await sha(`${f.path}:${f.size}`);
       let rec: PaperRecord = {
+        ...seed,
         id,
         name: f.name,
         path: f.path,
         size: f.size,
         fingerprint: id,
         profile,
-        importedAt: new Date().toISOString(),
-        page: 1,
-        scale: 1.1,
-        scrollTop: 0,
-        bookmarks: [],
+        importedAt: seed.importedAt || new Date().toISOString(),
         status: "parsing",
       };
-      if (!keys.text) {
-        const next = [rec, ...papers.filter((p) => p.id !== id)];
+      if (!runtimeKeys.text) {
+        const next = [rec, ...library.filter((p) => p.id !== id)];
         setProgress(null);
         setError(
-          "论文结构已解析，但模型预读尚未开始。请先在设置中配置 DeepSeek API Key。",
+          "论文结构已解析，但模型预读尚未开始。请先在设置中配置文字模型 API。",
         );
         paperRef.current = rec;
         setPaper(rec);
@@ -221,23 +276,23 @@ export function App() {
         await window.paperTutor.saveState({
           library: next,
           activePaperId: id,
-          settings,
+          settings: runtimeSettings,
         });
         setView("settings");
         return;
       }
-      setProgress({ n: 84, msg: "DeepSeek 正在阅读论文结构与核心内容" });
+      setProgress({ n: 84, msg: "大模型正在阅读论文结构与核心内容" });
       const rid = crypto.randomUUID();
       const r = await window.paperTutor.llmRequest({
         id: rid,
-        baseUrl: settings.textBaseUrl,
+        baseUrl: runtimeSettings.textBaseUrl,
         route: "TEXT",
-        model: settings.textModel,
-        apiKey: keys.text,
+        model: runtimeSettings.textModel,
+        apiKey: runtimeKeys.text,
         temperature: 0.1,
         maxTokens: 2600,
         stream: false,
-        timeout: settings.timeout,
+        timeout: runtimeSettings.timeout,
         messages: [
           {
             role: "system",
@@ -259,19 +314,10 @@ export function App() {
         ],
       });
       if (!r.ok) throw Object.assign(new Error(r.message), { code: r.code });
-      try {
-        const data = JSON.parse(r.text.replace(/^```json|```$/g, "").trim());
-        profile.researchQuestion =
-          data.researchQuestion || profile.researchQuestion;
-        profile.contributions = data.contributions || profile.contributions;
-        profile.methods = data.methods || profile.methods;
-        (data.sections || []).forEach((x: any) => {
-          const s = profile.sections.find((y) => y.id === x.id);
-          if (s && x.summary) s.summary = x.summary;
-        });
-      } catch {}
-      rec = { ...rec, status: "ready", profile };
-      const next = [rec, ...papers.filter((p) => p.id !== id)];
+      const data = parseOverviewResponse(r.text);
+      rec.profile = applyOverviewTranslation(profile, data);
+      rec = { ...rec, status: "ready", profile: rec.profile };
+      const next = [rec, ...library.filter((p) => p.id !== id)];
       paperRef.current = rec;
       setPaper(rec);
       setOcrPages(ocrPagesFromProfile(rec.profile));
@@ -279,10 +325,11 @@ export function App() {
       await window.paperTutor.saveState({
         library: next,
         activePaperId: id,
-        settings,
+        settings: runtimeSettings,
       });
       setProgress(null);
       setView("overview");
+      setLibraryOpen(false);
     } catch (e: any) {
       setProgress(null);
       setError(errText[e.code] || `论文导入失败：${e.message || "未知错误"}`);
@@ -823,6 +870,14 @@ export function App() {
             <Scan />
             OCR 文本
           </button>
+          <button
+            className="status"
+            onClick={() => setLibraryOpen(true)}
+            aria-label="打开论文目录"
+          >
+            <List />
+            论文目录
+          </button>
           <button className="import" onClick={importPdf}>
             <UploadSimple />
             导入论文
@@ -955,6 +1010,16 @@ export function App() {
           </div>
         </div>
       )}
+      {libraryOpen && (
+        <PaperLibrary
+          papers={papers}
+          activeId={paper?.id}
+          onOpen={openRecord}
+          onImportPaper={importPdf}
+          onImportFolder={importPaperFolder}
+          onClose={() => setLibraryOpen(false)}
+        />
+      )}
     </div>
   );
 }
@@ -972,8 +1037,8 @@ function Overview({
           返回阅读
         </button>
         <p className="eyebrow">Paper Overview</p>
-        <h1>{paper.profile.title}</h1>
-        <p>{paper.profile.abstract}</p>
+        <h1>{paper.profile.overviewTitle || paper.profile.title}</h1>
+        <p>{paper.profile.overviewAbstract || paper.profile.abstract}</p>
       </header>
       <div className="overview-grid">
         <section>
@@ -996,7 +1061,9 @@ function Overview({
           <h2>阅读地图</h2>
           {paper.profile.sections.slice(0, 14).map((s) => (
             <button key={s.id} onClick={onBack}>
-              <span>{s.title}</span>
+              <span>
+                {paper.profile.overviewSectionTitles?.[s.id] || s.title}
+              </span>
               <small>第 {s.page} 页</small>
             </button>
           ))}

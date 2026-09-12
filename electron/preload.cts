@@ -1,6 +1,7 @@
 const { contextBridge, ipcRenderer } = require("electron");
 contextBridge.exposeInMainWorld("paperTutor", {
   choosePdf: () => ipcRenderer.invoke("choose-pdf"),
+  choosePaperFolder: () => ipcRenderer.invoke("choose-paper-folder"),
   readPdf: (path: string) => ipcRenderer.invoke("read-pdf", path),
   loadState: () => ipcRenderer.invoke("load-state"),
   saveState: (patch: unknown) => ipcRenderer.invoke("save-state", patch),

@@ -26,8 +26,11 @@ export type Section = {
 };
 export type PaperProfile = {
   title: string;
+  overviewTitle?: string;
   authors: string;
   abstract: string;
+  overviewAbstract?: string;
+  overviewSectionTitles?: Record<string, string>;
   researchQuestion: string;
   contributions: string[];
   methods: string[];
@@ -56,7 +59,8 @@ export type PaperRecord = {
   scale: number;
   scrollTop: number;
   bookmarks?: Bookmark[];
-  status: "ready" | "parsing" | "error";
+  status: "indexed" | "ready" | "parsing" | "error";
+  folderName?: string;
 };
 export type OcrMode = "disabled" | "api";
 export type Settings = {
@@ -78,6 +82,9 @@ declare global {
   interface Window {
     paperTutor: {
       choosePdf(): Promise<string | null>;
+      choosePaperFolder(): Promise<
+        Array<{ path: string; name: string; size: number; folderName: string }>
+      >;
       readPdf(
         path: string,
       ): Promise<{
