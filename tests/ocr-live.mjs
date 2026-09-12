@@ -4,9 +4,11 @@ import os from "node:os";
 import path from "node:path";
 const pdf = process.argv[2],
   key = process.env.PAPERTUTOR_TEST_API_KEY,
-  url =
-    "https://example.com/v1";
-if (!pdf || !key) throw Error("PDF and key required");
+  url = process.env.PAPERTUTOR_TEST_BASE_URL;
+if (!pdf || !key || !url)
+  throw Error(
+    "A private test PDF, PAPERTUTOR_TEST_API_KEY and PAPERTUTOR_TEST_BASE_URL are required",
+  );
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), "papertutor-ocr-")),
   state = path.join(profile, "papertutor-data.json");
 const paper = {

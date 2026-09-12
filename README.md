@@ -96,6 +96,14 @@ npm run test:ui
 
 UI 测试覆盖启动、800×600 至 2560×1440 的七种尺寸、设置页、真实 PDF 导入与应用重启恢复。模型连接使用设置页的真实连接测试；项目不把 Mock 回答视为模型验收。
 
+## 隐私与安全开发规则
+
+- 真实 API Key、授权头和用户专属 Workspace 地址不得进入 Git。
+- 真实论文、私人论文名称、本机用户路径、运行状态、截图、日志和缓存不得提交。
+- 私人测试资源、API 地址和凭据只能通过环境变量或命令行参数传入；缺失时测试应跳过或明确退出。
+- `.env.example` 只保留空值；PDF、DOC、DOCX、截图和 Electron profile 默认被忽略。
+- 提交前运行 `npm run privacy:check`；历史发布前运行 `npm run privacy:history`。本地 hook 可通过 `npm run hooks:install` 安装。
+
 费用始终标为“估算费用”。当前价格表包含 `qwen3.7-plus` 和 `qwen3.8-max` 的基础公开 CNY 单价，不模拟免费额度、限时优惠、Token Plan、缓存折扣或节省计划；未知模型显示“未配置”。
 
 ## 当前限制

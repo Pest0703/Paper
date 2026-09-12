@@ -10,7 +10,9 @@ tmp/
 temp/
 logs/
 test-results/
+playwright-report/
 test-assets/.papertutor-profile/
+test-assets/private/
 screenshots/
 .env
 .env.*
@@ -22,3 +24,5 @@ screenshots/
 *.docx
 papertutor-data.json
 converted-documents/
+**/user-data/
+**/electron-profile/

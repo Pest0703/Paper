@@ -10,6 +10,10 @@
     "start": "electron .",
     "test": "vitest run",
     "test:ui": "npm run build && playwright test",
+    "privacy:check": "node scripts/privacy-check.mjs",
+    "privacy:history": "node scripts/privacy-check.mjs --history",
+    "privacy:test": "node scripts/privacy-check.test.mjs",
+    "hooks:install": "node scripts/install-git-hooks.mjs",
     "pack": "npm run build && electron-builder --dir",
     "installer": "npm run build && electron-builder --win nsis"
   },

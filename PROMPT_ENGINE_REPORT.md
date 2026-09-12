@@ -89,7 +89,7 @@ p.12 | §5.1.1 ...
 
 ## 13. 实际运行与 DeepSeek
 
-测试论文：`test-assets/private-test-paper.pdf`。
+测试论文：一份通过命令行传入、未提交仓库的 `private-test-paper.pdf`。
 
 | 任务 | 实际 Input | 实际 Output | 可见回答字符 | 结果 |
 |---|---:|---:|---:|---|

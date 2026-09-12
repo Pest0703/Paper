@@ -14,12 +14,15 @@ describe("API error classification", () => {
   });
 
   it("redacts credentials, image data and local paths from details", () => {
+    const key = "sk-" + "1234567890abcdef";
+    const localPath = ["C:", "Users", "private", "paper.png"].join("\\");
+    const authorization = "Authorization:" + " Bearer " + "secret-token";
     const safe = sanitizeApiErrorDetail(
-      "Authorization: Bearer [REDACTED] api_key=sk-[REDACTED] private-test-resource",
+      `${authorization} api_key=${key} ${localPath} data:image/png;base64,AAAA`,
     );
     expect(safe).not.toContain("secret-token");
-    expect(safe).not.toContain("sk-[REDACTED]");
-    expect(safe).not.toContain("C:\\Users");
+    expect(safe).not.toContain(key);
+    expect(safe).not.toContain(["C:", "Users"].join("\\"));
     expect(safe).not.toContain("base64,AAAA");
   });
 });

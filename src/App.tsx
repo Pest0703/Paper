@@ -46,11 +46,9 @@ import type {
 } from "./types";
 const defaults: SettingsType = {
   provider: "Custom OpenAI Compatible",
-  textBaseUrl:
-    "https://example.com/v1",
+  textBaseUrl: "",
   textModel: "qwen3.7-plus",
-  visionBaseUrl:
-    "https://example.com/v1",
+  visionBaseUrl: "",
   visionModel: "qwen3.8-max",
   ocrMode: "disabled",
   ocrBaseUrl: "",
