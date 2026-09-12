@@ -2,7 +2,9 @@
 
 PaperTutor 是一个面向研究生的 Windows 桌面论文精读工具。它支持 PDF、DOC 和 DOCX；Word 文档在本机生成可缓存的阅读视图，原文不修改。阅读时直接选中文字，Prompt Engine 会按任务只携带必要的句段、章节、指代证据和压缩对话状态请求 DeepSeek 等 OpenAI 兼容模型。
 
-当前版本：`0.2.2` · 当前状态：Beta
+当前版本：`0.3.0` · 当前状态：Beta
+
+0.3.0 将论文目录与完整 Profile 分层：启动只读轻量 Metadata，当前论文的 Profile、PDF 与笔记按需加载，Profile/Note 各使用最多 3 项 LRU，切换时销毁旧 PDF。新增基于 Tiptap/ProseMirror 的本地富文本论文笔记、SQLite 事务存储、独立图片资产、论文锚点、PDF/AI 内容加入笔记，以及支持选择、拖动排序、合并或分别生成 DOCX 的导出中心。
 
 0.2.2 新增可持久化论文目录与文件夹导入。导入文件夹时只登记 PDF、DOC、DOCX 的路径和基础信息，不解析正文、不调用模型；用户打开其中一篇后才进行结构解析和模型预读。英文论文概述中的标题、摘要、研究问题、贡献、方法和章节地图统一生成简体中文阅读版本，模型进度提示不再绑定具体服务商。
 
@@ -11,6 +13,13 @@ PaperTutor 是一个面向研究生的 Windows 桌面论文精读工具。它支
 ## 已实现
 
 - Electron 桌面应用，React + TypeScript 界面
+- App Shell 与 Reader 恢复解耦；3、30、300 篇目录均只加载轻量元数据
+- 每篇完整论文 Profile/OCR/书签独立保存到 `papers/<paperId>/profile.json`，按需读取并自动迁移旧数据
+- 一篇论文对应一份 SQLite 主笔记，正文按需加载，850 ms 防抖自动保存，切换论文与退出前强制保存
+- 富文本笔记支持字体、字号、颜色、背景、高亮、四级标题、对齐、列表、任务项、缩进、引用、表格、图片、公式、代码、链接和撤销重做
+- 笔记图片独立保存、按内容哈希去重，不以 Base64 长期进入数据库
+- PDF 选区与 AI 回答可由用户主动加入笔记；论文页码锚点可跳回阅读页
+- 导出中心支持多选、全选、拖动顺序、合并/分别导出、分页与 Word TOC 字段
 - PDF canvas 与可选文本层，支持连续滚动、缩放、搜索、复制及蓝色选区
 - 支持在 PDF 页面直接框选公式、图表或图片生成高清 PNG，并携带页码、附近正文和自定义问题交给视觉模型分析
 - 自动保存每篇论文的当前页码与精确滚动位置，关闭重启后回到上次阅读处
@@ -41,11 +50,13 @@ PaperTutor 是一个面向研究生的 Windows 桌面论文精读工具。它支
 ## 架构
 
 ```text
-electron/              主进程、文件访问、安全密钥、模型网络请求
+electron/              主进程、Profile/SQLite/资产/DOCX、文件访问、安全密钥、模型网络请求
 src/PdfViewer.tsx      PDF 渲染与文本选择
 src/services/parser.ts PDF 层级解析
 src/services/context.ts 检索与上下文预算入口
 src/TutorPanel.tsx     流式导师对话
+src/NoteEditor.tsx     Tiptap 富文本论文笔记
+src/ExportCenter.tsx   多论文 DOCX 导出中心
 src/AiCallDetails.tsx  单次调用详情与上下文查看器
 src/services/aiObservability.ts 请求元数据、快照与安全清洗
 src/services/pricing.ts 模型基础公开单价与费用估算
@@ -87,9 +98,9 @@ npm run pack
 
 ## 数据与缓存
 
-配置、论文档案、阅读位置位于 Electron 的 `userData` 目录内，数据文件名为 `papertutor-data.json`。原始 PDF 不复制，应用保存其本机路径。移动原文件后需重新导入。
+`papertutor-data.json` 只保存设置、当前论文 ID 与轻量论文目录。完整论文档案位于 `papers/<paperId>/profile.json`，笔记位于 `papertutor-notes.db`，图片位于 `note-assets/<noteId>/`。原始 PDF 不复制，应用保存其本机路径。移动原文件后需重新导入。
 
-AI 回答缓存和 OCR 缓存分别存储。OCR 缓存身份包含论文、页码、页面图像哈希、OCR 模型和 Prompt 版本；重复识别同页可直接命中。设置页的清理操作只删除可重新生成的数据，占用中的 Word 转换缓存会跳过并报告，不会导致应用崩溃。
+AI 回答缓存和 OCR 缓存分别存储。设置页清理缓存不会删除论文、笔记数据库、笔记图片、书签、阅读进度或 API 设置。
 
 ## 测试
 
@@ -105,7 +116,7 @@ UI 测试覆盖启动、800×600 至 2560×1440 的七种尺寸、设置页、�
 - 真实 API Key、授权头和用户专属 Workspace 地址不得进入 Git。
 - 真实论文、私人论文名称、本机用户路径、运行状态、截图、日志和缓存不得提交。
 - 私人测试资源、API 地址和凭据只能通过环境变量或命令行参数传入；缺失时测试应跳过或明确退出。
-- `.env.example` 只保留空值；PDF、DOC、DOCX、截图和 Electron profile 默认被忽略。
+- `.env.example` 只保留空值；PDF、DOC、DOCX、SQLite、笔记图片、导出文件、截图和 Electron profile 默认被忽略。
 - 提交前运行 `npm run privacy:check`；历史发布前运行 `npm run privacy:history`。本地 hook 可通过 `npm run hooks:install` 安装。
 
 费用始终标为“估算费用”。当前价格表包含 `qwen3.7-plus` 和 `qwen3.8-max` 的基础公开 CNY 单价，不模拟免费额度、限时优惠、Token Plan、缓存折扣或节省计划；未知模型显示“未配置”。
@@ -117,6 +128,7 @@ UI 测试覆盖启动、800×600 至 2560×1440 的七种尺寸、设置页、�
 - 图片理解效果取决于所配置视觉模型对公式、图表和小字号截图的能力。
 - 第一版采用关键词相关性检索，Provider 接口已与检索实现解耦，可后续加入 embedding。
 - 费用仅在已配置公开单价的模型上估算，服务商未返回 usage 时相应 Token 字段显示不可用。
+- 公式在 DOCX 中当前以 Cambria Math 文本保真导出，尚未转换为 Word 原生 OMML；复杂嵌套列表与图片原始比例的映射仍可继续增强。
 
 ## 后续方向
 

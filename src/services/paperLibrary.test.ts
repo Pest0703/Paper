@@ -15,7 +15,8 @@ describe("paper library", () => {
   it("creates a metadata-only record without parsed content", () => {
     const paper = createIndexedPaper(file, "paper-1");
     expect(paper.status).toBe("indexed");
-    expect(paper.profile.sections).toEqual([]);
+    expect("profile" in paper).toBe(false);
+    expect(paper.profileStatus).toBe("missing");
     expect(paperStatusLabel(paper.status)).toBe("未打开");
   });
 

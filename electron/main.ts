@@ -1,12 +1,24 @@
-import { app, BrowserWindow, dialog, ipcMain, safeStorage } from "electron";
+import {
+  app,
+  BrowserWindow,
+  dialog,
+  ipcMain,
+  net,
+  protocol,
+  safeStorage,
+  shell,
+} from "electron";
 import path from "node:path";
 import fs from "node:fs/promises";
 import crypto from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { pathToFileURL } from "node:url";
 import Store from "electron-store";
 import { parseStreamData } from "./streamParser.js";
 import { classifyApiError, sanitizeApiErrorDetail } from "./apiErrors.js";
+import { NoteStore } from "./noteStore.js";
+import { buildNotesDocx, sanitizeFilename } from "./docxExport.js";
 
 type AppState = {
   library?: unknown[];
@@ -21,10 +33,69 @@ const store = new Store<AppState>({
   name: "papertutor-data",
   defaults: { library: [], settings: {} },
 });
+const bootAt = performance.now();
+const devTiming = (name: string, startedAt = bootAt) => {
+  if (!app.isPackaged)
+    console.info(
+      `[Startup Performance] ${name} ${Math.round(performance.now() - startedAt)} ms`,
+    );
+};
 const controllers = new Map<string, AbortController>();
 let win: BrowserWindow | null = null;
+let notes: NoteStore | null = null;
+let closeConfirmed = false;
 const execFileAsync = promisify(execFile);
 const activeConverted = new Set<string>();
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: "papertutor-note-asset",
+    privileges: { secure: true, supportFetchAPI: true },
+  },
+]);
+const safeId = (id: string) => String(id).replace(/[^a-zA-Z0-9_-]/g, "");
+const paperDataPath = (id: string) =>
+  path.join(app.getPath("userData"), "papers", safeId(id), "profile.json");
+const libraryMetadata = (record: any) => ({
+  id: record.id,
+  name: record.name,
+  path: record.path,
+  size: record.size || 0,
+  fingerprint: record.fingerprint || record.id,
+  importedAt: record.importedAt,
+  lastOpenedAt: record.lastOpenedAt,
+  page: record.page || 1,
+  scale: record.scale || 1.1,
+  scrollTop: record.scrollTop || 0,
+  status: record.status || "indexed",
+  folderName: record.folderName,
+  title: record.title || record.profile?.title || record.name,
+  authors: record.authors || record.profile?.authors || "",
+  bookmarkCount: record.bookmarkCount ?? record.bookmarks?.length ?? 0,
+  profileStatus:
+    record.profileStatus || (record.profile?.sections ? "ready" : "missing"),
+});
+
+async function savePaperData(id: string, data: any) {
+  const target = paperDataPath(id);
+  await fs.mkdir(path.dirname(target), { recursive: true });
+  const temporary = `${target}.tmp`;
+  const backup = `${target}.bak`;
+  await fs.writeFile(temporary, JSON.stringify(data), "utf8");
+  try {
+    await fs.rename(temporary, target);
+  } catch (error: any) {
+    if (!["EEXIST", "EPERM"].includes(error?.code)) throw error;
+    await fs.rm(backup, { force: true });
+    await fs.rename(target, backup);
+    try {
+      await fs.rename(temporary, target);
+      await fs.rm(backup, { force: true });
+    } catch (replaceError) {
+      await fs.rename(backup, target).catch(() => {});
+      throw replaceError;
+    }
+  }
+}
 const encrypt = (value = "") =>
   value ? safeStorage.encryptString(value).toString("base64") : "";
 const decrypt = (value = "") => {
@@ -81,6 +152,7 @@ async function prepareReadableDocument(sourcePath: string) {
 }
 
 function createWindow() {
+  closeConfirmed = false;
   win = new BrowserWindow({
     width: 1440,
     height: 900,
@@ -101,9 +173,37 @@ function createWindow() {
   if (dev) win.loadURL(dev);
   else win.loadFile(path.join(import.meta.dirname, "../dist/index.html"));
   win.once("ready-to-show", () => win?.show());
+  win.on("close", (event) => {
+    if (closeConfirmed) return;
+    event.preventDefault();
+    win?.webContents.send("flush-notes-before-close");
+    setTimeout(() => {
+      closeConfirmed = true;
+      win?.destroy();
+    }, 2500);
+  });
 }
 
 app.whenReady().then(() => {
+  devTiming("mainReady");
+  notes = new NoteStore(app.getPath("userData"));
+  protocol.handle("papertutor-note-asset", (request) => {
+    const url = new URL(request.url);
+    const parts = url.pathname.split("/").filter(Boolean);
+    if (parts.length !== 2) return new Response("Not found", { status: 404 });
+    const noteId = safeId(parts[0]);
+    const filename = /^[a-f0-9]{64}\.(png|jpe?g|gif|webp)$/i.test(parts[1])
+      ? parts[1]
+      : "";
+    if (!noteId || !filename) return new Response("Not found", { status: 404 });
+    const target = path.join(
+      app.getPath("userData"),
+      "note-assets",
+      noteId,
+      filename,
+    );
+    return net.fetch(pathToFileURL(target).toString());
+  });
   createWindow();
   app.on(
     "activate",
@@ -111,7 +211,135 @@ app.whenReady().then(() => {
   );
 });
 app.on("window-all-closed", () => {
+  notes?.close();
+  notes = null;
   if (process.platform !== "darwin") app.quit();
+});
+ipcMain.handle("note-list", () => notes?.list() || []);
+ipcMain.handle("note-open", (_e, paperId: string, title: string) =>
+  notes!.getOrCreate(paperId, title),
+);
+ipcMain.handle("note-save", (_e, note: any) => {
+  notes!.save(note);
+  return true;
+});
+ipcMain.handle("open-external", (_e, target: string) => {
+  const url = new URL(target);
+  if (!["http:", "https:"].includes(url.protocol))
+    throw new Error("不允许的链接协议");
+  return shell.openExternal(url.toString());
+});
+ipcMain.handle("notes-flushed", () => {
+  closeConfirmed = true;
+  win?.destroy();
+  return true;
+});
+async function persistNoteImage(
+  noteId: string,
+  bytes: Uint8Array,
+  extension: string,
+) {
+  const hash = crypto.createHash("sha256").update(bytes).digest("hex");
+  const ext = extension.replace(/[^a-z0-9]/gi, "").toLowerCase() || "png";
+  const dir = path.join(app.getPath("userData"), "note-assets", safeId(noteId));
+  const filename = `${hash}.${ext}`;
+  await fs.mkdir(dir, { recursive: true });
+  try {
+    await fs.access(path.join(dir, filename));
+  } catch {
+    await fs.writeFile(path.join(dir, filename), bytes);
+  }
+  notes?.registerAsset(noteId, {
+    id: hash,
+    relativePath: path.join(safeId(noteId), filename),
+    mime: `image/${ext}`,
+    hash,
+  });
+  return `papertutor-note-asset://asset/${safeId(noteId)}/${filename}`;
+}
+ipcMain.handle("note-choose-image", async (_e, noteId: string) => {
+  const result = await dialog.showOpenDialog(win!, {
+    properties: ["openFile"],
+    filters: [
+      { name: "图片", extensions: ["png", "jpg", "jpeg", "gif", "webp"] },
+    ],
+  });
+  if (result.canceled) return null;
+  const source = result.filePaths[0];
+  return persistNoteImage(
+    noteId,
+    await fs.readFile(source),
+    path.extname(source).slice(1),
+  );
+});
+ipcMain.handle(
+  "note-save-image",
+  (_e, noteId: string, bytes: Uint8Array, mime: string) =>
+    persistNoteImage(noteId, bytes, mime.split("/")[1] || "png"),
+);
+ipcMain.handle("export-notes", async (_e, payload: any) => {
+  const library = (store.get("library") || []) as any[];
+  const selected = (payload.paperIds || [])
+    .map((paperId: string) => {
+      const metadata = library.find((paper) => paper.id === paperId);
+      const note = notes?.loadByPaper(paperId);
+      return note && metadata
+        ? { title: metadata.title || metadata.name, content: note.content }
+        : null;
+    })
+    .filter(Boolean) as Array<{ title: string; content: any }>;
+  if (!selected.length) throw new Error("没有可导出的笔记");
+  if (payload.mode === "separate") {
+    const result = await dialog.showOpenDialog(win!, {
+      properties: ["openDirectory", "createDirectory"],
+    });
+    if (result.canceled) return { canceled: true };
+    const directory = result.filePaths[0];
+    const files: string[] = [];
+    for (let index = 0; index < selected.length; index++) {
+      win?.webContents.send("export-progress", {
+        current: index + 1,
+        total: selected.length,
+      });
+      const base = sanitizeFilename(selected[index].title);
+      let target = path.join(directory, `${base}.docx`),
+        suffix = 2;
+      while (
+        await fs
+          .access(target)
+          .then(() => true)
+          .catch(() => false)
+      )
+        target = path.join(directory, `${base} (${suffix++}).docx`);
+      await fs.writeFile(
+        target,
+        await buildNotesDocx([selected[index]], app.getPath("userData"), {
+          toc: false,
+          pageBreak: false,
+        }),
+      );
+      files.push(target);
+    }
+    return { canceled: false, files };
+  }
+  const result = await dialog.showSaveDialog(win!, {
+    defaultPath: "PaperTutor-Notes.docx",
+    filters: [{ name: "Word 文档", extensions: ["docx"] }],
+  });
+  if (result.canceled || !result.filePath) return { canceled: true };
+  win?.webContents.send("export-progress", {
+    current: 1,
+    total: selected.length,
+  });
+  await fs.writeFile(
+    result.filePath,
+    await buildNotesDocx(
+      selected,
+      app.getPath("userData"),
+      payload.options || {},
+    ),
+  );
+  return { canceled: false, files: [result.filePath] };
 });
 
 ipcMain.handle("choose-pdf", async () => {
@@ -192,11 +420,48 @@ ipcMain.handle("read-pdf", async (_e, filePath: string) => {
     size: source.size,
   };
 });
-ipcMain.handle("load-state", () => store.store);
-ipcMain.handle("save-state", (_e, patch: Partial<AppState>) => {
-  Object.entries(patch).forEach(([k, v]) =>
-    store.set(k as keyof AppState, v as never),
+ipcMain.handle("load-state", async () => {
+  const startedAt = performance.now();
+  const raw = store.store;
+  const legacy = Array.isArray(raw.library) ? (raw.library as any[]) : [];
+  const library = legacy.map(libraryMetadata);
+  await Promise.all(
+    legacy
+      .filter((record) => record?.profile)
+      .map((record) =>
+        savePaperData(record.id, {
+          profile: record.profile,
+          bookmarks: record.bookmarks || [],
+          schemaVersion: 1,
+        }).catch(() => {}),
+      ),
   );
+  if (legacy.some((record) => record?.profile)) store.set("library", library);
+  const result = {
+    settings: raw.settings || {},
+    activePaperId: raw.activePaperId,
+    library,
+  };
+  devTiming("loadState", startedAt);
+  return result;
+});
+ipcMain.handle("save-state", (_e, patch: Partial<AppState>) => {
+  Object.entries(patch).forEach(([k, v]) => {
+    if (k === "library" && Array.isArray(v))
+      store.set("library", v.map(libraryMetadata) as never);
+    else store.set(k as keyof AppState, v as never);
+  });
+  return true;
+});
+ipcMain.handle("load-paper-data", async (_e, id: string) => {
+  try {
+    return JSON.parse(await fs.readFile(paperDataPath(id), "utf8"));
+  } catch {
+    return null;
+  }
+});
+ipcMain.handle("save-paper-data", async (_e, id: string, data: any) => {
+  await savePaperData(id, data);
   return true;
 });
 ipcMain.handle("save-secret", (_e, key: string) => {
@@ -219,16 +484,19 @@ ipcMain.handle("load-secret", () => {
   }
 });
 ipcMain.handle("load-secrets", () => {
+  const startedAt = performance.now();
   const saved = store.get("encryptedSecrets") || {},
     legacy =
       decrypt(store.get("encryptedSecret") || "") ||
       process.env.DEEPSEEK_API_KEY ||
       "";
-  return {
+  const result = {
     text: decrypt(saved.text) || legacy,
     vision: decrypt(saved.vision) || legacy,
     ocr: decrypt(saved.ocr),
   };
+  devTiming("loadSecrets", startedAt);
+  return result;
 });
 ipcMain.handle(
   "save-secrets",

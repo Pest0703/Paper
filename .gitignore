@@ -24,5 +24,10 @@ screenshots/
 *.docx
 papertutor-data.json
 converted-documents/
+*.db
+*.db-wal
+*.db-shm
+note-assets/
+exports/
 **/user-data/
 **/electron-profile/

@@ -62,6 +62,29 @@ export type PaperRecord = {
   status: "indexed" | "ready" | "parsing" | "error";
   folderName?: string;
 };
+export type PaperLibraryItem = Omit<PaperRecord, "profile" | "bookmarks"> & {
+  title?: string;
+  authors?: string;
+  bookmarkCount?: number;
+  profileStatus: "missing" | "ready" | "stale";
+  lastOpenedAt?: string;
+};
+export type PaperFullData = {
+  profile: PaperProfile;
+  bookmarks: Bookmark[];
+  schemaVersion: 1;
+};
+export type NoteDocument = {
+  id: string;
+  paperId: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+  lastScrollTop: number;
+  lastCursor: number;
+  schemaVersion: number;
+  content: any;
+};
 export type OcrMode = "disabled" | "api";
 export type Settings = {
   provider: string;
@@ -85,9 +108,7 @@ declare global {
       choosePaperFolder(): Promise<
         Array<{ path: string; name: string; size: number; folderName: string }>
       >;
-      readPdf(
-        path: string,
-      ): Promise<{
+      readPdf(path: string): Promise<{
         bytes: ArrayBuffer;
         name: string;
         path: string;
@@ -95,6 +116,24 @@ declare global {
       }>;
       loadState(): Promise<any>;
       saveState(patch: any): Promise<boolean>;
+      loadPaperData(id: string): Promise<PaperFullData | null>;
+      savePaperData(id: string, data: PaperFullData): Promise<boolean>;
+      noteList(): Promise<any[]>;
+      noteOpen(paperId: string, title: string): Promise<NoteDocument>;
+      noteSave(note: Partial<NoteDocument> & { id: string }): Promise<boolean>;
+      openExternal(url: string): Promise<void>;
+      noteChooseImage(noteId: string): Promise<string | null>;
+      noteSaveImage(
+        noteId: string,
+        bytes: Uint8Array,
+        mime: string,
+      ): Promise<string>;
+      exportNotes(
+        payload: any,
+      ): Promise<{ canceled: boolean; files?: string[] }>;
+      onExportProgress(cb: (data: any) => void): () => void;
+      onBeforeClose(cb: () => void): () => void;
+      confirmNotesFlushed(): Promise<boolean>;
       loadSecret(): Promise<string>;
       saveSecret(key: string): Promise<boolean>;
       loadSecrets(): Promise<ApiSecrets>;

@@ -2,10 +2,15 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 
 const BLOCKED_DOCUMENT = /\.(?:pdf|doc|docx)$/i;
+const BLOCKED_RUNTIME =
+  /(?:^|\/)(?:note-assets|exports)(?:\/|$)|\.(?:db|db-wal|db-shm)$/i;
 const RULES = [
   ["Windows user-home path", /[A-Za-z]:\\Users\\(?!<)[^\\\s]+\\/i],
   ["macOS user-home path", /\/Users\/(?!<)[^/\s]+\//i],
-  ["personal folder path", /(?:^|[\\/"'])(?:Desktop|Downloads|Documents|OneDrive)[\\/]/i],
+  [
+    "personal folder path",
+    /(?:^|[\\/"'])(?:Desktop|Downloads|Documents|OneDrive)[\\/]/i,
+  ],
   ["API secret", /sk-[A-Za-z0-9_-]{16,}/i],
   ["Authorization bearer", /Authorization\s*:\s*Bearer\s+[A-Za-z0-9._-]{12,}/i],
   [
@@ -32,6 +37,13 @@ export function scanEntries(entries) {
     const normalized = name.replaceAll("\\", "/");
     if (BLOCKED_DOCUMENT.test(normalized)) {
       findings.push({ name: normalized, rule: "private document file" });
+      continue;
+    }
+    if (BLOCKED_RUNTIME.test(normalized)) {
+      findings.push({
+        name: normalized,
+        rule: "private note or export artifact",
+      });
       continue;
     }
     for (const [rule, pattern] of RULES) {

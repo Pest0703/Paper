@@ -5,7 +5,7 @@ import {
   MagnifyingGlass,
   X,
 } from "@phosphor-icons/react";
-import type { PaperRecord } from "./types";
+import type { PaperLibraryItem } from "./types";
 import { paperStatusLabel } from "./services/paperLibrary";
 
 export function PaperLibrary({
@@ -16,9 +16,9 @@ export function PaperLibrary({
   onImportFolder,
   onClose,
 }: {
-  papers: PaperRecord[];
+  papers: PaperLibraryItem[];
   activeId?: string;
-  onOpen: (paper: PaperRecord) => void;
+  onOpen: (paper: PaperLibraryItem) => void;
   onImportPaper: () => void;
   onImportFolder: () => void;
   onClose: () => void;

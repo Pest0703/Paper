@@ -1,22 +1,23 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import * as pdfjs from "pdfjs-dist";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 import {
   BookOpen,
   CloudCheck,
   GearSix,
   List,
+  NotePencil,
+  Export,
   DotsThreeOutline,
   Scan,
   SidebarSimple,
   Sparkle,
   UploadSimple,
 } from "@phosphor-icons/react";
-import { PdfViewer } from "./PdfViewer";
 import { Settings } from "./Settings";
 import { TutorPanel, type Turn } from "./TutorPanel";
 import { OcrPanel } from "./OcrPanel";
 import { PaperLibrary } from "./PaperLibrary";
+import type { NoteEditorHandle, NoteInsertion } from "./NoteEditor";
 import {
   ocrPagesFromProfile,
   upsertOcrPage,
@@ -48,16 +49,19 @@ import { cacheClearPatch } from "./services/cachePolicy";
 import { OVERVIEW_SYSTEM_PROMPT } from "./prompts/overviewPrompt";
 import {
   createIndexedPaper,
-  emptyPaperProfile,
   mergePaperLibrary,
+  toLibraryItem,
 } from "./services/paperLibrary";
 import {
   applyOverviewTranslation,
   parseOverviewResponse,
 } from "./services/overviewTranslation";
+import { LruCache } from "./services/lru";
 import type {
   ApiSecrets,
   Bookmark,
+  PaperLibraryItem,
+  PaperFullData,
   PaperRecord,
   Settings as SettingsType,
 } from "./types";
@@ -75,6 +79,15 @@ const defaults: SettingsType = {
   streaming: true,
   timeout: 180000,
 };
+const NoteEditor = lazy(() =>
+  import("./NoteEditor").then((module) => ({ default: module.NoteEditor })),
+);
+const PdfViewer = lazy(() =>
+  import("./PdfViewer").then((module) => ({ default: module.PdfViewer })),
+);
+const ExportCenter = lazy(() =>
+  import("./ExportCenter").then((module) => ({ default: module.ExportCenter })),
+);
 const errText: Record<string, string> = {
   auth: "API 认证失败，请到设置检查密钥。",
   model: "模型名称不可用，请到设置修改。",
@@ -89,7 +102,7 @@ const errText: Record<string, string> = {
 };
 export function App() {
   const [hydrated, setHydrated] = useState(false);
-  const [papers, setPapers] = useState<PaperRecord[]>([]);
+  const [papers, setPapers] = useState<PaperLibraryItem[]>([]);
   const [paper, setPaper] = useState<PaperRecord | null>(null);
   const [pdf, setPdf] = useState<PDFDocumentProxy | null>(null);
   const [settings, setSettings] = useState(defaults);
@@ -104,6 +117,12 @@ export function App() {
   const [panel, setPanel] = useState(true);
   const [ocrOpen, setOcrOpen] = useState(false);
   const [libraryOpen, setLibraryOpen] = useState(false);
+  const [noteOpen, setNoteOpen] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
+  const [noteInsertion, setNoteInsertion] = useState<NoteInsertion | null>(
+    null,
+  );
+  const [selectedPage, setSelectedPage] = useState(1);
   const [ocrBusy, setOcrBusy] = useState(false);
   const [ocrPages, setOcrPages] = useState<OcrPageResult[]>([]);
   const [selected, setSelected] = useState("");
@@ -131,6 +150,26 @@ export function App() {
   const ocrCache = useRef(new Map<string, string>());
   const tokenMetrics = useRef<any[]>([]);
   const paperRef = useRef<PaperRecord | null>(null);
+  const profileCache = useRef(new LruCache<string, PaperFullData>(3));
+  const pdfRef = useRef<PDFDocumentProxy | null>(null);
+  const noteEditorRef = useRef<NoteEditorHandle>(null);
+  useEffect(() => {
+    document.documentElement.dataset.shellReady = String(
+      Math.round(performance.now()),
+    );
+    if (import.meta.env.DEV)
+      console.info(
+        `[Startup Performance] React Shell Mounted ${Math.round(performance.now())} ms`,
+      );
+  }, []);
+  useEffect(
+    () =>
+      window.paperTutor.onBeforeClose(async () => {
+        await noteEditorRef.current?.flush();
+        await window.paperTutor.confirmNotesFlushed();
+      }),
+    [],
+  );
   useEffect(() => {
     Promise.all([
       window.paperTutor.loadState(),
@@ -141,26 +180,21 @@ export function App() {
         if (loadedSettings.provider === "OpenAI Compatible")
           loadedSettings.provider = "Custom OpenAI Compatible";
         setSettings(loadedSettings);
-        tokenMetrics.current = Array.isArray(s.tokenMetrics)
-          ? s.tokenMetrics
-          : [];
-        answerCache.current = new Map(Object.entries(s.answerCache || {}));
-        ocrCache.current = new Map(Object.entries(s.ocrCache || {}));
         setKeys(k);
-        const lib = (s.library || []) as PaperRecord[];
+        const lib = (s.library || []) as PaperLibraryItem[];
         setPapers(lib);
-        const active = lib.find((p) => p.id === s.activePaperId) || lib[0];
-        if (
-          active &&
-          active.status === "ready" &&
-          !active.profile.overviewTitle &&
-          k.text
-        )
-          await analyzePaper(active, loadedSettings, k, lib);
-        else if (active && active.status !== "indexed")
-          await openRecord(active);
-        else if (lib.length) setLibraryOpen(true);
+        document.documentElement.dataset.libraryReady = String(
+          Math.round(performance.now()),
+        );
+        if (import.meta.env.DEV)
+          console.info(
+            `[Startup Performance] Library Visible ${Math.round(performance.now())} ms`,
+          );
+        const active = lib.find((p) => p.id === s.activePaperId);
         setHydrated(true);
+        if (active)
+          setTimeout(() => openRecord(active, loadedSettings, k, lib), 0);
+        else if (lib.length) setLibraryOpen(true);
       })
       .catch(() => {
         setError("本地应用状态读取失败，已使用默认设置启动。");
@@ -174,30 +208,66 @@ export function App() {
       }),
     [requestId],
   );
-  const persist = (next: PaperRecord[]) =>
-    window.paperTutor.saveState({
-      library: next,
-      activePaperId: paper?.id,
-      settings,
-    });
-  async function openRecord(rec: PaperRecord) {
-    if (rec.status === "indexed") return analyzePaper(rec);
+  function cacheProfile(id: string, data: PaperFullData) {
+    profileCache.current.set(id, data);
+  }
+  async function releasePdf() {
+    const previous = pdfRef.current;
+    pdfRef.current = null;
+    setPdf(null);
+    if (previous) {
+      try {
+        await previous.cleanup();
+        await previous.destroy();
+      } catch {}
+    }
+  }
+  async function openRecord(
+    rec: PaperLibraryItem,
+    runtimeSettings = settings,
+    runtimeKeys = keys,
+    library = papers,
+  ) {
+    const restoreStarted = performance.now();
+    if (import.meta.env.DEV)
+      console.info("[Startup Performance] Active Paper Restore Start");
+    await noteEditorRef.current?.flush();
+    let data: PaperFullData | null | undefined = profileCache.current.get(
+      rec.id,
+    );
+    if (!data) {
+      data = await window.paperTutor.loadPaperData(rec.id);
+      if (data) cacheProfile(rec.id, data);
+    }
+    if (!data || rec.profileStatus === "missing")
+      return analyzePaper(rec, runtimeSettings, runtimeKeys, library);
     try {
+      await releasePdf();
       const f = await window.paperTutor.readPdf(rec.path);
+      const pdfjs = await import("pdfjs-dist");
       const doc = await pdfjs.getDocument({ data: new Uint8Array(f.bytes) })
         .promise;
+      pdfRef.current = doc;
       setPdf(doc);
       const restored = {
         ...rec,
+        profile: data.profile,
+        bookmarks: data.bookmarks || [],
         page: rec.page || 1,
         scrollTop: rec.scrollTop || 0,
-        bookmarks: rec.bookmarks || [],
       };
       paperRef.current = restored;
       setPaper(restored);
       setOcrPages(ocrPagesFromProfile(restored.profile));
       setView("reader");
       setLibraryOpen(false);
+      document.documentElement.dataset.readerReady = String(
+        Math.round(performance.now()),
+      );
+      if (import.meta.env.DEV)
+        console.info(
+          `[Startup Performance] Active Paper Ready ${Math.round(performance.now() - restoreStarted)} ms`,
+        );
     } catch {
       setError("无法重新打开这篇论文，原文件可能已移动。");
     }
@@ -213,13 +283,14 @@ export function App() {
       path,
       size: 0,
       fingerprint: id,
-      profile: emptyPaperProfile(name),
       importedAt: new Date().toISOString(),
       page: 1,
       scale: 1.1,
       scrollTop: 0,
-      bookmarks: [],
       status: "indexed",
+      profileStatus: "missing",
+      title: name.replace(/\.(pdf|docx?)$/i, ""),
+      bookmarkCount: 0,
     });
   }
   async function importPaperFolder() {
@@ -236,7 +307,7 @@ export function App() {
     setLibraryOpen(true);
   }
   async function analyzePaper(
-    seed: PaperRecord,
+    seed: PaperLibraryItem,
     runtimeSettings = settings,
     runtimeKeys = keys,
     library = papers,
@@ -245,8 +316,11 @@ export function App() {
     setError("");
     try {
       const f = await window.paperTutor.readPdf(seed.path);
+      await releasePdf();
+      const pdfjs = await import("pdfjs-dist");
       const doc = await pdfjs.getDocument({ data: new Uint8Array(f.bytes) })
         .promise;
+      pdfRef.current = doc;
       setPdf(doc);
       const profile = await parsePaper(doc, (n, msg) =>
         setProgress({ n, msg }),
@@ -260,11 +334,13 @@ export function App() {
         size: f.size,
         fingerprint: id,
         profile,
+        bookmarks: [],
         importedAt: seed.importedAt || new Date().toISOString(),
         status: "parsing",
       };
       if (!runtimeKeys.text) {
-        const next = [rec, ...library.filter((p) => p.id !== id)];
+        const item = { ...toLibraryItem(rec), profileStatus: "ready" as const };
+        const next = [item, ...library.filter((p) => p.id !== id)];
         setProgress(null);
         setError(
           "论文结构已解析，但模型预读尚未开始。请先在设置中配置文字模型 API。",
@@ -273,6 +349,13 @@ export function App() {
         setPaper(rec);
         setOcrPages(ocrPagesFromProfile(rec.profile));
         setPapers(next);
+        const full = {
+          profile: rec.profile,
+          bookmarks: rec.bookmarks || [],
+          schemaVersion: 1 as const,
+        };
+        cacheProfile(id, full);
+        await window.paperTutor.savePaperData(id, full);
         await window.paperTutor.saveState({
           library: next,
           activePaperId: id,
@@ -317,7 +400,15 @@ export function App() {
       const data = parseOverviewResponse(r.text);
       rec.profile = applyOverviewTranslation(profile, data);
       rec = { ...rec, status: "ready", profile: rec.profile };
-      const next = [rec, ...library.filter((p) => p.id !== id)];
+      const full = {
+        profile: rec.profile,
+        bookmarks: rec.bookmarks || [],
+        schemaVersion: 1 as const,
+      };
+      cacheProfile(id, full);
+      await window.paperTutor.savePaperData(id, full);
+      const item = toLibraryItem(rec);
+      const next = [item, ...library.filter((p) => p.id !== id)];
       paperRef.current = rec;
       setPaper(rec);
       setOcrPages(ocrPagesFromProfile(rec.profile));
@@ -683,11 +774,12 @@ export function App() {
     });
     recordMetric(call);
   }
-  function onSelected(t: string) {
+  function onSelected(t: string, page = paper?.page || 1) {
     const completed = paper ? completeSelection(paper.profile, t) : t;
     setSelected(completed);
     setCapture(null);
     setOriginalSelected(completed);
+    setSelectedPage(page);
     setAnswer("");
     setAnswerCall(null);
     setTurns([]);
@@ -755,8 +847,16 @@ export function App() {
     const p = { ...current, ...ch };
     paperRef.current = p;
     setPaper(p);
+    const full: PaperFullData = {
+      profile: p.profile,
+      bookmarks: p.bookmarks || [],
+      schemaVersion: 1,
+    };
+    cacheProfile(p.id, full);
+    window.paperTutor.savePaperData(p.id, full);
     setPapers((existing) => {
-      const next = existing.map((x) => (x.id === p.id ? p : x));
+      const item = toLibraryItem(p);
+      const next = existing.map((x) => (x.id === p.id ? item : x));
       window.paperTutor.saveState({
         library: next,
         activePaperId: p.id,
@@ -771,7 +871,15 @@ export function App() {
     const p = { ...current, bookmarks };
     paperRef.current = p;
     setPaper(p);
-    const next = papers.map((x) => (x.id === p.id ? p : x));
+    const full: PaperFullData = {
+      profile: p.profile,
+      bookmarks,
+      schemaVersion: 1,
+    };
+    cacheProfile(p.id, full);
+    window.paperTutor.savePaperData(p.id, full);
+    const item = toLibraryItem(p);
+    const next = papers.map((x) => (x.id === p.id ? item : x));
     setPapers(next);
     window.paperTutor.saveState({
       library: next,
@@ -811,16 +919,22 @@ export function App() {
     answerCache.current.clear();
     ocrCache.current.clear();
     setOcrPages([]);
-    const patch = cacheClearPatch(papers),
-      cleaned = patch.library;
-    setPapers(cleaned);
     if (paper) {
-      const current = cleaned.find((p) => p.id === paper.id) || paper;
-      setPaper(current);
-      paperRef.current = current;
+      const cleaned = cacheClearPatch([paper]).library[0];
+      setPaper(cleaned);
+      paperRef.current = cleaned;
+      const full: PaperFullData = {
+        profile: cleaned.profile,
+        bookmarks: cleaned.bookmarks || [],
+        schemaVersion: 1,
+      };
+      cacheProfile(cleaned.id, full);
+      await window.paperTutor.savePaperData(cleaned.id, full);
     }
     await window.paperTutor.saveState({
-      ...patch,
+      answerCache: {},
+      ocrCache: {},
+      library: papers,
       ...(paper ? { activePaperId: paper.id } : {}),
       settings,
     });
@@ -835,8 +949,6 @@ export function App() {
         : null,
     [paper],
   );
-  if (!hydrated)
-    return <div className="startup">PaperTutor 正在准备阅读环境…</div>;
   return (
     <div className="app-shell">
       <nav className="topbar">
@@ -864,6 +976,14 @@ export function App() {
           )}
           <button
             className="status"
+            onClick={() => setExportOpen(true)}
+            aria-label="导出笔记"
+          >
+            <Export />
+            导出笔记
+          </button>
+          <button
+            className="status"
             onClick={() => setOcrOpen(true)}
             aria-label="打开 OCR 文本页"
           >
@@ -878,6 +998,16 @@ export function App() {
             <List />
             论文目录
           </button>
+          {paper && (
+            <button
+              className="status"
+              onClick={() => setNoteOpen(true)}
+              aria-label="打开论文笔记"
+            >
+              <NotePencil />
+              论文笔记
+            </button>
+          )}
           <button className="import" onClick={importPdf}>
             <UploadSimple />
             导入论文
@@ -914,21 +1044,28 @@ export function App() {
             panel ? "tutor-open" : "panel-closed"
           }`}
         >
-          <PdfViewer
-            pdf={pdf}
-            page={paper?.page || 1}
-            scale={paper?.scale || 1.1}
-            initialScrollTop={paper?.scrollTop || 0}
-            bookmarks={paper?.bookmarks || []}
-            onPage={(n) => updateRec({ page: n })}
-            onScale={(n) => updateRec({ scale: n })}
-            onScroll={(n) => updateRec({ scrollTop: n })}
-            onAddBookmark={addBookmark}
-            onRemoveBookmark={removeBookmark}
-            onCapture={onCaptured}
-            onOcr={executeOcr}
-            onSelect={onSelected}
-          />
+          {!hydrated && (
+            <div className="reader-restoring">正在加载论文目录…</div>
+          )}
+          <Suspense
+            fallback={<div className="reader-restoring">正在准备阅读器…</div>}
+          >
+            <PdfViewer
+              pdf={pdf}
+              page={paper?.page || 1}
+              scale={paper?.scale || 1.1}
+              initialScrollTop={paper?.scrollTop || 0}
+              bookmarks={paper?.bookmarks || []}
+              onPage={(n) => updateRec({ page: n })}
+              onScale={(n) => updateRec({ scale: n })}
+              onScroll={(n) => updateRec({ scrollTop: n })}
+              onAddBookmark={addBookmark}
+              onRemoveBookmark={removeBookmark}
+              onCapture={onCaptured}
+              onOcr={executeOcr}
+              onSelect={onSelected}
+            />
+          </Suspense>
           {ocrOpen && (
             <OcrPanel
               pages={ocrPages}
@@ -976,6 +1113,32 @@ export function App() {
               onClose={() => setPanel(false)}
               onJump={(p) => updateRec({ page: p })}
               promptDebug={promptDebug}
+              onAddSelection={() => {
+                if (!selected.trim()) return;
+                setNoteOpen(true);
+                setNoteInsertion({
+                  id: crypto.randomUUID(),
+                  kind: "quote",
+                  text: selected,
+                  page: selectedPage,
+                  sectionId: current?.id,
+                });
+              }}
+              onAddAnswer={() => {
+                const text =
+                  answer ||
+                  turns.filter((t) => t.role === "assistant").at(-1)?.content ||
+                  "";
+                if (!text) return;
+                setNoteOpen(true);
+                setNoteInsertion({
+                  id: crypto.randomUUID(),
+                  kind: "ai",
+                  text,
+                  page: selectedPage,
+                  sectionId: current?.id,
+                });
+              }}
             />
           )}
         </div>
@@ -1019,6 +1182,31 @@ export function App() {
           onImportFolder={importPaperFolder}
           onClose={() => setLibraryOpen(false)}
         />
+      )}
+      {noteOpen && paper && (
+        <Suspense
+          fallback={<div className="panel-loading">正在打开论文笔记…</div>}
+        >
+          <NoteEditor
+            ref={noteEditorRef}
+            paper={paper}
+            pending={noteInsertion}
+            onConsumed={() => setNoteInsertion(null)}
+            onClose={() => setNoteOpen(false)}
+            onAnchor={(page) => {
+              updateRec({ page });
+              setNoteOpen(false);
+              setView("reader");
+            }}
+          />
+        </Suspense>
+      )}
+      {exportOpen && (
+        <Suspense
+          fallback={<div className="panel-loading">正在打开导出中心…</div>}
+        >
+          <ExportCenter papers={papers} onClose={() => setExportOpen(false)} />
+        </Suspense>
       )}
     </div>
   );

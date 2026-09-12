@@ -235,7 +235,7 @@ export function Settings({
               {fmt(cache.conversionBytes || 0)}
             </p>
             <p>
-              只清理可重新生成的数据，不删除论文、进度、书签、模型设置或密钥。
+              只清理可重新生成的数据，不删除论文、笔记、笔记图片、书签、阅读进度、模型设置或密钥。
             </p>
             <button className="danger" onClick={() => setConfirm(true)}>
               <Trash />
@@ -258,7 +258,7 @@ export function Settings({
             <h2>确认清除缓存？</h2>
             <p>
               将删除 AI 回答、OCR 结果和未占用的 Word
-              转换缓存。不会删除论文、阅读进度、书签、API 设置或安全密钥。
+              转换缓存。不会删除论文、笔记、笔记图片、阅读进度、书签、API 设置或安全密钥。
             </p>
             <div>
               <button onClick={() => setConfirm(false)}>取消</button>

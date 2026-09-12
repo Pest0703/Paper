@@ -1,4 +1,47 @@
-# PaperTutor 0.2.2 测试报告
+# PaperTutor 0.3.0 测试报告
+
+## 0.3.0 启动架构、论文笔记与 DOCX 导出
+
+### 启动性能根因与修改
+
+- 旧 `PaperRecord[]` 把所有 sections、paragraphs、sentences、OCR 和书签放入 `papertutor-data.json`；React Shell 又等待 active PDF 读取和 PDF.js 初始化，因此论文数量和全文规模直接放大启动时间与内存。
+- 新目录仅保留论文名称、路径、状态、阅读位置、标题作者、书签数量和 Profile 状态。完整 Profile 按 paperId 独立原子写入 `papers/<paperId>/profile.json`，旧记录首次启动自动迁移。
+- App Shell 不再等待 active reader；当前 Profile 后台加载，其他 Profile/PDF 完全不触碰。Profile LRU 上限 3，Note LRU 上限 3，PDF 只保留当前一个，切换时执行 cleanup/destroy。
+- 开发态匿名埋点覆盖 Main Ready、Renderer Start、loadState、loadSecrets、Shell Mounted、Library Visible、Active Restore 与 Reader Ready。
+
+### 实测性能
+
+|                              数据量 |           状态大小 | 内部 Shell Ready |  内部 Library Ready | 总进程工作集 |
+| ----------------------------------: | -----------------: | ---------------: | ------------------: | -----------: |
+|                     优化前 3 篇全文 |            1.52 MB |           未解耦 |  约 701 ms 外部可见 |       379 MB |
+|                    优化前 30 篇全文 |           15.18 MB |           未解耦 |  约 836 ms 外部可见 |       440 MB |
+|                   优化前 300 篇全文 |          151.80 MB |           未解耦 | 约 2646 ms 外部可见 |      1364 MB |
+|                优化后 3 篇 Metadata |             1.1 KB |           397 ms |              418 ms |       387 MB |
+|               优化后 30 篇 Metadata |            10.4 KB |           370 ms |              394 ms |       386 MB |
+|              优化后 300 篇 Metadata |           104.3 KB |           362 ms |              382 ms |       395 MB |
+| 300 篇 Metadata + 300 Note Metadata | 104.3 KB app state |           355 ms |              383 ms |       392 MB |
+
+外部进程启动包含 Electron 创建进程的固定成本；验收使用应用内 performance 时间。300 篇时没有全文或 300 份 Note JSON 进入 Renderer。
+
+### Note 架构与编辑能力
+
+- 使用 Tiptap/ProseMirror；一篇 paperId 对应一份 SQLite 主 Note。`notes`、`note_documents`、`note_assets` 分表，WAL、事务、schemaVersion、滚动位置和光标位置均已启用。
+- 编辑器状态留在 NoteEditor，850 ms 防抖后批量 IPC；切换论文和窗口关闭均先 flush。再次打开恢复原文、光标与滚动位置，“继续记录”跳到末尾。
+- 支持字体、字号、粗斜体、上下划线、删除线、上下标、文字色、背景、高亮、H1-H4、四种对齐、列表、Checklist、缩进、引用、表格增删/合并/拆分、图片、公式、行内/块代码、链接、分隔线和撤销重做。
+- 图片从本地、粘贴入口写入独立资产目录，SHA-256 去重，数据库与 Note JSON 只保存引用。外链仅允许由 Main Process 打开 HTTP/HTTPS。
+
+### PaperTutor 集成、Autosave 与导出
+
+- PDF 选区和 AI 回答均只能由用户点击“加入笔记”写入，并携带可点击 Page Anchor；笔记不会自动进入模型上下文。
+- 导出中心只读取 Note Metadata，支持有笔记论文多选、全选/全不选、拖动排序、合并或分别导出、每篇新页和 Word TOC 字段。
+- DOCX 在 Main Process 构建，保留标题、基本字符格式、颜色、高亮、对齐、列表、引用、表格、嵌入图片、公式文本、代码、链接和来源锚点；非法文件名字符替换，重名自动加序号。
+- 结构验证检查 `word/document.xml`、标题顺序和 `word/media/`；Microsoft Word COM 只读打开验证成功。公式当前使用 Cambria Math 文本而非 OMML。
+
+### 测试与隐私
+
+- 单元测试覆盖 Metadata、迁移、Profile/Note LRU、1:1 Note、100,000 字 + 100 图片 + 20 表格 + 50 公式压力文档、DOCX 顺序/表格/图片/公式/锚点与文件名。
+- Electron 测试覆盖 Shell、文件夹惰性索引、旧 Profile 迁移、三路凭据、缓存清理保护 Note、Note 关闭/重启/继续记录。
+- `.gitignore` 与 Privacy Guard 新增 DB、WAL、Note Assets 和 exports 拦截；不使用真实论文或私人 Note fixture。
 
 ## 0.2.2 中文概述与论文目录
 

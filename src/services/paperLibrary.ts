@@ -1,4 +1,4 @@
-import type { PaperProfile, PaperRecord } from "../types";
+import type { PaperLibraryItem, PaperProfile, PaperRecord } from "../types";
 
 export type DiscoveredPaper = {
   path: string;
@@ -23,7 +23,7 @@ export function emptyPaperProfile(name: string): PaperProfile {
 export function createIndexedPaper(
   file: DiscoveredPaper,
   id: string,
-): PaperRecord {
+): PaperLibraryItem {
   return {
     id,
     name: file.name,
@@ -31,24 +31,37 @@ export function createIndexedPaper(
     size: file.size,
     folderName: file.folderName,
     fingerprint: id,
-    profile: emptyPaperProfile(file.name),
     importedAt: new Date().toISOString(),
     page: 1,
     scale: 1.1,
     scrollTop: 0,
-    bookmarks: [],
     status: "indexed",
+    profileStatus: "missing",
+    title: file.name.replace(/\.(pdf|docx?)$/i, ""),
+    bookmarkCount: 0,
   };
 }
 
 export function mergePaperLibrary(
-  current: PaperRecord[],
-  discovered: PaperRecord[],
+  current: PaperLibraryItem[],
+  discovered: PaperLibraryItem[],
 ) {
   const byPath = new Map(current.map((paper) => [paper.path, paper]));
   for (const paper of discovered)
     if (!byPath.has(paper.path)) byPath.set(paper.path, paper);
   return [...byPath.values()];
+}
+
+export function toLibraryItem(record: PaperRecord): PaperLibraryItem {
+  const { profile, bookmarks, ...metadata } = record;
+  return {
+    ...metadata,
+    title: profile.title,
+    authors: profile.authors,
+    bookmarkCount: bookmarks?.length || 0,
+    profileStatus: "ready",
+    lastOpenedAt: new Date().toISOString(),
+  };
 }
 
 export const paperStatusLabel = (status: PaperRecord["status"]) =>

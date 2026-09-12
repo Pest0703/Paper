@@ -2,6 +2,61 @@ import { test, expect, _electron as electron } from "@playwright/test";
 import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
+import { PDFDocument, StandardFonts } from "pdf-lib";
+
+async function seedReadyPaper(profile: string, id: string, name: string) {
+  const pdf = await PDFDocument.create();
+  const page = pdf.addPage([595, 842]);
+  const font = await pdf.embedFont(StandardFonts.Helvetica);
+  page.drawText(`Synthetic paper ${id}`, { x: 60, y: 780, size: 18, font });
+  const filePath = path.join(profile, name);
+  fs.writeFileSync(filePath, await pdf.save());
+  const metadata = {
+    id,
+    name,
+    path: filePath,
+    size: fs.statSync(filePath).size,
+    fingerprint: id,
+    importedAt: "2026-01-01T00:00:00.000Z",
+    page: 1,
+    scale: 1.1,
+    scrollTop: 0,
+    status: "ready",
+    profileStatus: "ready",
+    title: `Paper ${id}`,
+    authors: "Test Author",
+    bookmarkCount: 0,
+  };
+  const paperDir = path.join(profile, "papers", id);
+  fs.mkdirSync(paperDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(paperDir, "profile.json"),
+    JSON.stringify({
+      profile: {
+        title: metadata.title,
+        authors: "Test Author",
+        abstract: "Synthetic",
+        researchQuestion: "Test",
+        contributions: [],
+        methods: [],
+        keywords: [],
+        sections: [
+          {
+            id: "s1",
+            title: "Introduction",
+            level: 1,
+            page: 1,
+            summary: "Synthetic",
+            paragraphs: [],
+          },
+        ],
+      },
+      bookmarks: [],
+      schemaVersion: 1,
+    }),
+  );
+  return metadata;
+}
 test("launches, adapts, and exposes three independent API sections", async () => {
   const profile = fs.mkdtempSync(path.join(os.tmpdir(), "papertutor-empty-"));
   const app = await electron.launch({
@@ -71,9 +126,7 @@ test("indexes a paper folder without parsing or model calls and restores it", as
   expect(state.library.every((item: any) => item.status === "indexed")).toBe(
     true,
   );
-  expect(
-    state.library.every((item: any) => item.profile.sections.length === 0),
-  ).toBe(true);
+  expect(state.library.every((item: any) => !("profile" in item))).toBe(true);
   expect(state.lastPromptMetric).toBeUndefined();
 
   app = await electron.launch({
@@ -86,6 +139,40 @@ test("indexes a paper folder without parsing or model calls and restores it", as
   await app.close();
   fs.rmSync(profile, { recursive: true, force: true });
   fs.rmSync(folder, { recursive: true, force: true });
+});
+test("migrates legacy full profiles out of lightweight app state", async () => {
+  const profile = fs.mkdtempSync(path.join(os.tmpdir(), "papertutor-migrate-"));
+  const legacy = await seedReadyPaper(profile, "paper-legacy", "legacy.pdf");
+  const full = JSON.parse(
+    fs.readFileSync(
+      path.join(profile, "papers", legacy.id, "profile.json"),
+      "utf8",
+    ),
+  );
+  fs.rmSync(path.join(profile, "papers"), { recursive: true, force: true });
+  fs.writeFileSync(
+    path.join(profile, "papertutor-data.json"),
+    JSON.stringify({
+      library: [{ ...legacy, profile: full.profile, bookmarks: [] }],
+      settings: {},
+    }),
+  );
+  const app = await electron.launch({
+    args: [".", `--user-data-dir=${profile}`],
+    cwd: path.resolve("."),
+  });
+  const page = await app.firstWindow();
+  await page.locator(".brand").waitFor();
+  await page.waitForTimeout(300);
+  await app.close();
+  const state = JSON.parse(
+    fs.readFileSync(path.join(profile, "papertutor-data.json"), "utf8"),
+  );
+  expect(state.library[0]).not.toHaveProperty("profile");
+  expect(
+    fs.existsSync(path.join(profile, "papers", legacy.id, "profile.json")),
+  ).toBe(true);
+  fs.rmSync(profile, { recursive: true, force: true });
 });
 test("imports a real PDF and preserves its local record after restart", async () => {
   const sample = path.resolve("test-assets/attention-is-all-you-need.pdf"),
@@ -132,6 +219,26 @@ test("persists three credentials and cache clearing preserves them", async () =>
   await page.getByLabel("OCR API Key").fill("KEY-C");
   await page.getByLabel("OCR 模型").fill("MODEL-C");
   await page.getByRole("button", { name: "保存设置" }).click();
+  await page.evaluate(async () => {
+    const note = await window.paperTutor.noteOpen(
+      "cache-safety-paper",
+      "Paper Alpha",
+    );
+    await window.paperTutor.noteSave({
+      id: note.id,
+      content: {
+        type: "doc",
+        content: [
+          {
+            type: "paragraph",
+            content: [{ type: "text", text: "Test Note Alpha" }],
+          },
+        ],
+      },
+      lastCursor: 1,
+      lastScrollTop: 0,
+    });
+  });
   await app.close();
   app = await electron.launch({
     args: [".", `--user-data-dir=${profile}`],
@@ -142,6 +249,15 @@ test("persists three credentials and cache clearing preserves them", async () =>
   await expect(page.getByLabel("TEXT API Key")).toHaveValue("KEY-A");
   await expect(page.getByLabel("VISION API Key")).toHaveValue("KEY-B");
   await expect(page.getByLabel("OCR API Key")).toHaveValue("KEY-C");
+  expect(
+    await page.evaluate(async () => {
+      const note = await window.paperTutor.noteOpen(
+        "cache-safety-paper",
+        "Paper Alpha",
+      );
+      return JSON.stringify(note.content).includes("Test Note Alpha");
+    }),
+  ).toBe(true);
   await page.getByRole("button", { name: "清除全部安全缓存" }).click();
   await expect(page.getByText("确认清除缓存？")).toBeVisible();
   await page.getByRole("button", { name: "确认清除" }).click();
@@ -157,6 +273,52 @@ test("persists three credentials and cache clearing preserves them", async () =>
   await expect(page.getByLabel("VISION API URL")).toHaveValue("URL-B");
   await expect(page.getByLabel("OCR API URL")).toHaveValue("URL-C");
   await expect(page.getByLabel("OCR API Key")).toHaveValue("KEY-C");
+  await app.close();
+  fs.rmSync(profile, { recursive: true, force: true });
+});
+
+test("autosaves one rich note per paper and restores it after restart", async () => {
+  const profile = fs.mkdtempSync(path.join(os.tmpdir(), "papertutor-note-ui-"));
+  const alpha = await seedReadyPaper(profile, "paper-alpha", "alpha.pdf");
+  fs.writeFileSync(
+    path.join(profile, "papertutor-data.json"),
+    JSON.stringify({ library: [alpha], activePaperId: alpha.id, settings: {} }),
+  );
+  let app = await electron.launch({
+    args: [".", `--user-data-dir=${profile}`],
+    cwd: path.resolve("."),
+  });
+  let page = await app.firstWindow();
+  await page.getByLabel("打开论文笔记").waitFor({ timeout: 15000 });
+  await page.getByLabel("打开论文笔记").click();
+  await page.getByRole("complementary", { name: "论文笔记" }).waitFor();
+  const editor = page.locator(".tiptap");
+  await editor.click();
+  await editor.fill("Old Note One\nOld Note Two");
+  await page.waitForTimeout(1100);
+  await app.close();
+
+  app = await electron.launch({
+    args: [".", `--user-data-dir=${profile}`],
+    cwd: path.resolve("."),
+  });
+  page = await app.firstWindow();
+  await page.getByLabel("打开论文笔记").waitFor({ timeout: 15000 });
+  await page.getByLabel("打开论文笔记").click();
+  await expect(page.locator(".tiptap")).toContainText("Old Note One");
+  await page.getByRole("button", { name: /继续记录/ }).click();
+  await page.locator(".tiptap").pressSequentially(" New Note Three");
+  await app.close();
+
+  app = await electron.launch({
+    args: [".", `--user-data-dir=${profile}`],
+    cwd: path.resolve("."),
+  });
+  page = await app.firstWindow();
+  await page.getByLabel("打开论文笔记").waitFor({ timeout: 15000 });
+  await page.getByLabel("打开论文笔记").click();
+  await expect(page.locator(".tiptap")).toContainText("Old Note One");
+  await expect(page.locator(".tiptap")).toContainText("New Note Three");
   await app.close();
   fs.rmSync(profile, { recursive: true, force: true });
 });

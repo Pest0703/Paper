@@ -14,6 +14,7 @@
 12. If a possible secret or private identifier is found, stop pushing and sanitize it first.
 13. Apply these rules regardless of repository visibility.
 14. Treat every commit as potentially public.
+15. Never commit Note databases, Note assets, user-authored Note content, or exported documents.
 
 ## Versioning
 
