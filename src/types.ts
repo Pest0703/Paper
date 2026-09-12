@@ -85,6 +85,24 @@ export type NoteDocument = {
   schemaVersion: number;
   content: any;
 };
+export type NotePaperContext = {
+  paperId: string;
+  title: string;
+  page: number;
+  sectionId?: string;
+};
+export type NoteInsertion = {
+  id: string;
+  paperId: string;
+  text: string;
+  kind: "quote" | "ai" | "anchor";
+  page: number;
+  sectionId?: string;
+};
+export type NoteInsertRequest = {
+  context: NotePaperContext;
+  insertion: NoteInsertion;
+};
 export type OcrMode = "disabled" | "api";
 export type Settings = {
   provider: string;
@@ -132,8 +150,19 @@ declare global {
         payload: any,
       ): Promise<{ canceled: boolean; files?: string[] }>;
       onExportProgress(cb: (data: any) => void): () => void;
-      onBeforeClose(cb: () => void): () => void;
-      confirmNotesFlushed(): Promise<boolean>;
+      openNoteWindow(context: NotePaperContext): Promise<boolean>;
+      updateNoteContext(context: NotePaperContext): Promise<boolean>;
+      insertIntoNote(request: NoteInsertRequest): Promise<boolean>;
+      noteWindowReady(): Promise<boolean>;
+      getNoteContext(): Promise<NotePaperContext | null>;
+      onNoteContext(cb: (context: NotePaperContext) => void): () => void;
+      onNoteInsertion(cb: (request: NoteInsertRequest) => void): () => void;
+      onNoteFlushRequest(cb: (requestId: string) => void): () => void;
+      confirmNoteFlush(requestId: string, ok: boolean): Promise<boolean>;
+      jumpToPaper(target: { paperId: string; page: number }): Promise<boolean>;
+      onJumpToPaper(cb: (target: { paperId: string; page: number }) => void): () => void;
+      requestExportCenter(): Promise<boolean>;
+      onOpenExportCenter(cb: () => void): () => void;
       loadSecret(): Promise<string>;
       saveSecret(key: string): Promise<boolean>;
       loadSecrets(): Promise<ApiSecrets>;

@@ -4,6 +4,14 @@ import fs from "node:fs";
 import os from "node:os";
 import { PDFDocument, StandardFonts } from "pdf-lib";
 
+async function noteWindow(app: Awaited<ReturnType<typeof electron.launch>>) {
+  await expect.poll(() => app.windows().length).toBe(2);
+  const window = app.windows().find((item) => item.url().includes("window=notes"));
+  if (!window) throw new Error("Notes BrowserWindow was not created");
+  await window.getByRole("main", { name: "论文笔记" }).waitFor();
+  return window;
+}
+
 async function seedReadyPaper(profile: string, id: string, name: string) {
   const pdf = await PDFDocument.create();
   const page = pdf.addPage([595, 842]);
@@ -291,8 +299,8 @@ test("autosaves one rich note per paper and restores it after restart", async ()
   let page = await app.firstWindow();
   await page.getByLabel("打开论文笔记").waitFor({ timeout: 15000 });
   await page.getByLabel("打开论文笔记").click();
-  await page.getByRole("complementary", { name: "论文笔记" }).waitFor();
-  const editor = page.locator(".tiptap");
+  let notesPage = await noteWindow(app);
+  const editor = notesPage.locator(".tiptap");
   await editor.click();
   await editor.fill("Old Note One\nOld Note Two");
   await page.waitForTimeout(1100);
@@ -305,9 +313,10 @@ test("autosaves one rich note per paper and restores it after restart", async ()
   page = await app.firstWindow();
   await page.getByLabel("打开论文笔记").waitFor({ timeout: 15000 });
   await page.getByLabel("打开论文笔记").click();
-  await expect(page.locator(".tiptap")).toContainText("Old Note One");
-  await page.getByRole("button", { name: /继续记录/ }).click();
-  await page.locator(".tiptap").pressSequentially(" New Note Three");
+  notesPage = await noteWindow(app);
+  await expect(notesPage.locator(".tiptap")).toContainText("Old Note One");
+  await notesPage.getByRole("button", { name: /继续记录/ }).click();
+  await notesPage.locator(".tiptap").pressSequentially(" New Note Three");
   await app.close();
 
   app = await electron.launch({
@@ -317,8 +326,125 @@ test("autosaves one rich note per paper and restores it after restart", async ()
   page = await app.firstWindow();
   await page.getByLabel("打开论文笔记").waitFor({ timeout: 15000 });
   await page.getByLabel("打开论文笔记").click();
-  await expect(page.locator(".tiptap")).toContainText("Old Note One");
-  await expect(page.locator(".tiptap")).toContainText("New Note Three");
+  notesPage = await noteWindow(app);
+  await expect(notesPage.locator(".tiptap")).toContainText("Old Note One");
+  await expect(notesPage.locator(".tiptap")).toContainText("New Note Three");
+  await app.close();
+  fs.rmSync(profile, { recursive: true, force: true });
+});
+
+test("uses one lazy notes window and brokers context, inserts, anchors, export, close and geometry", async () => {
+  const profile = fs.mkdtempSync(path.join(os.tmpdir(), "papertutor-note-window-"));
+  const alpha = await seedReadyPaper(profile, "paper-window-alpha", "window-alpha.pdf");
+  const beta = await seedReadyPaper(profile, "paper-window-beta", "window-beta.pdf");
+  const gamma = await seedReadyPaper(profile, "paper-window-gamma", "window-gamma.pdf");
+  fs.writeFileSync(path.join(profile, "papertutor-data.json"), JSON.stringify({
+    library: [alpha, beta, gamma], activePaperId: alpha.id, settings: {},
+  }));
+  const app = await electron.launch({ args: [".", `--user-data-dir=${profile}`], cwd: path.resolve(".") });
+  const main = await app.firstWindow();
+  await main.getByLabel("打开论文笔记").waitFor({ timeout: 15000 });
+  expect(app.windows()).toHaveLength(1);
+  expect(await main.evaluate(() => performance.getEntriesByType("resource").some((entry) => entry.name.includes("NoteWindowApp")))).toBe(false);
+
+  for (let index = 0; index < 10; index++) await main.getByLabel("打开论文笔记").click();
+  let notesPage = await noteWindow(app);
+  expect(app.windows()).toHaveLength(2);
+  const readiness = await notesPage.evaluate(() => ({ tiptap: Number(document.documentElement.dataset.tiptapReady), loaded: Number(document.documentElement.dataset.noteLoaded) }));
+  expect(readiness.tiptap).toBeGreaterThan(0);
+  expect(readiness.loaded).toBeGreaterThanOrEqual(readiness.tiptap);
+  expect(readiness.loaded).toBeLessThan(1000);
+  console.log(`Note readiness: Tiptap ${readiness.tiptap} ms, loaded ${readiness.loaded} ms`);
+  await expect(notesPage.locator(".note-window-header").getByRole("heading", { name: "Paper paper-window-alpha" })).toBeVisible();
+  for (const [width, height] of [[760, 560], [1100, 820], [1600, 1000]]) {
+    const bounds = await app.evaluate(({ BrowserWindow }, size) => {
+      const target = BrowserWindow.getAllWindows().find((item) => item.webContents.getURL().includes("window=notes"))!;
+      target.unmaximize(); target.setSize(size.width, size.height); return target.getSize();
+    }, { width, height });
+    expect(bounds[0]).toBe(width);
+    expect(bounds[1]).toBeGreaterThanOrEqual(height);
+    expect(bounds[1]).toBeLessThanOrEqual(height + 2);
+    expect(await notesPage.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+  }
+  const maximized = await app.evaluate(({ BrowserWindow }) => {
+    const target = BrowserWindow.getAllWindows().find((item) => item.webContents.getURL().includes("window=notes"))!;
+    target.maximize(); return target.isMaximized();
+  });
+  expect(maximized).toBe(true);
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((item) => item.webContents.getURL().includes("window=notes"))!.unmaximize());
+
+  await main.bringToFront();
+  expect(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getFocusedWindow()?.webContents.getURL().includes("window=notes"))).toBe(false);
+
+  await main.evaluate(async ({ contexts }) => {
+    for (const context of contexts) await window.paperTutor.updateNoteContext(context);
+  }, { contexts: [alpha, beta, gamma, alpha, gamma].map((paper) => ({ paperId: paper.id, title: paper.title, page: 1, sectionId: "s1" })) });
+  await expect(notesPage.locator(".note-window-header").getByRole("heading", { name: "Paper paper-window-gamma" })).toBeVisible();
+  await main.evaluate((context) => window.paperTutor.updateNoteContext(context), { paperId: beta.id, title: beta.title, page: 1, sectionId: "s1" });
+  await expect(notesPage.locator(".note-window-header").getByRole("heading", { name: "Paper paper-window-beta" })).toBeVisible();
+  await main.getByLabel("打开论文目录").click();
+  await main.getByRole("button", { name: /window-beta\.pdf/ }).click();
+  await expect(notesPage.locator(".note-window-header").getByRole("heading", { name: "Paper paper-window-beta" })).toBeVisible({ timeout: 15000 });
+  expect(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getFocusedWindow()?.webContents.getURL().includes("window=notes"))).toBe(false);
+
+  const betaContext = { paperId: beta.id, title: beta.title, page: 1, sectionId: "s1" };
+  const accepted = await main.evaluate(async ({ context }) => {
+    return window.paperTutor.insertIntoNote({ context, insertion: { id: crypto.randomUUID(), paperId: context.paperId, text: "Beta selection marker", kind: "quote", page: 1, sectionId: "s1" } });
+  }, { context: betaContext });
+  expect(accepted).toBe(true);
+  await expect.poll(() => notesPage.evaluate(() => document.documentElement.dataset.lastInsertion || "")).not.toBe("");
+  await expect(notesPage.locator(".tiptap")).toContainText("Beta selection marker");
+  await expect(notesPage.locator(".tiptap > :first-child")).toHaveText("Paper paper-window-beta");
+  await notesPage.locator(".paper-anchor").last().click();
+  expect(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getFocusedWindow()?.webContents.getURL().includes("window=notes"))).toBe(false);
+  expect(app.windows()).toHaveLength(2);
+
+  const alphaContext = { paperId: alpha.id, title: alpha.title, page: 1, sectionId: "s1" };
+  await main.evaluate(async ({ context }) => {
+    await window.paperTutor.insertIntoNote({ context, insertion: { id: crypto.randomUUID(), paperId: context.paperId, text: "Alpha cross-paper AI marker", kind: "ai", page: 1, sectionId: "s1" } });
+  }, { context: alphaContext });
+  await expect(notesPage.locator(".note-window-header").getByRole("heading", { name: "Paper paper-window-beta" })).toBeVisible();
+  const stored = await main.evaluate(async ({ alphaId, betaId }) => {
+    const alphaNote = await window.paperTutor.noteOpen(alphaId, "Alpha");
+    const betaNote = await window.paperTutor.noteOpen(betaId, "Beta");
+    return { alpha: JSON.stringify(alphaNote.content), beta: JSON.stringify(betaNote.content) };
+  }, { alphaId: alpha.id, betaId: beta.id });
+  expect(stored.alpha).toContain("Alpha cross-paper AI marker");
+  expect(stored.beta).not.toContain("Alpha cross-paper AI marker");
+
+  await notesPage.getByRole("button", { name: /导出/ }).click();
+  await expect(main.getByRole("region", { name: "导出笔记" })).toBeVisible();
+  await main.getByLabel("关闭导出中心").click();
+  await notesPage.getByRole("button", { name: /清空编辑区/ }).click();
+  await expect(notesPage.getByRole("dialog", { name: "确认清空当前论文笔记" })).toBeVisible();
+  await notesPage.getByRole("button", { name: "取消" }).click();
+
+  await notesPage.getByRole("button", { name: /继续记录/ }).click();
+  await notesPage.locator(".tiptap").pressSequentially(" Immediate close marker");
+  await app.evaluate(({ BrowserWindow }) => {
+    const target = BrowserWindow.getAllWindows().find((item) => item.webContents.getURL().includes("window=notes"))!;
+    target.unmaximize(); target.setBounds({ x: 80, y: 70, width: 900, height: 650 });
+  });
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((item) => item.webContents.getURL().includes("window=notes"))!.close());
+  await expect.poll(() => app.windows().length).toBe(1);
+  await main.getByLabel("打开论文笔记").click();
+  notesPage = await noteWindow(app);
+  await expect(notesPage.locator(".tiptap")).toContainText("Immediate close marker");
+  const restored = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((item) => item.webContents.getURL().includes("window=notes"))!.getBounds());
+  expect(restored.width).toBe(900);
+  expect(restored.height).toBeGreaterThanOrEqual(650);
+  expect(restored.height).toBeLessThanOrEqual(652);
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((item) => item.webContents.getURL().includes("window=notes"))!.close());
+  await expect.poll(() => app.windows().length).toBe(1);
+  await main.evaluate(async (context) => {
+    await Promise.all(["Ready queue first", "Ready queue second"].map((text) => window.paperTutor.insertIntoNote({
+      context,
+      insertion: { id: crypto.randomUUID(), paperId: context.paperId, text, kind: "quote", page: 1, sectionId: "s1" },
+    })));
+  }, betaContext);
+  notesPage = await noteWindow(app);
+  await expect(notesPage.locator(".tiptap")).toContainText("Ready queue first");
+  await expect(notesPage.locator(".tiptap")).toContainText("Ready queue second");
   await app.close();
   fs.rmSync(profile, { recursive: true, force: true });
 });

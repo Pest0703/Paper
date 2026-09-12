@@ -2,7 +2,9 @@
 
 PaperTutor 是一个面向研究生的 Windows 桌面论文精读工具。它支持 PDF、DOC 和 DOCX；Word 文档在本机生成可缓存的阅读视图，原文不修改。阅读时直接选中文字，Prompt Engine 会按任务只携带必要的句段、章节、指代证据和压缩对话状态请求 DeepSeek 等 OpenAI 兼容模型。
 
-当前版本：`0.3.0` · 当前状态：Beta
+当前版本：`0.3.1` · 当前状态：Beta
+
+0.3.1 将完整 Tiptap 笔记编辑器迁移到按需创建的独立 Notes BrowserWindow：主阅读窗口与笔记窗口可在双屏并行使用，论文切换自动同步但不抢焦点，跨论文插入依靠 paperId 隔离并在切换前强制保存。新增窗口位置恢复、关闭保存握手、保存失败重试、危险清空确认、折叠工具栏，以及首次创建笔记时自动生成论文名称一级标题。
 
 0.3.0 将论文目录与完整 Profile 分层：启动只读轻量 Metadata，当前论文的 Profile、PDF 与笔记按需加载，Profile/Note 各使用最多 3 项 LRU，切换时销毁旧 PDF。新增基于 Tiptap/ProseMirror 的本地富文本论文笔记、SQLite 事务存储、独立图片资产、论文锚点、PDF/AI 内容加入笔记，以及支持选择、拖动排序、合并或分别生成 DOCX 的导出中心。
 
@@ -15,7 +17,8 @@ PaperTutor 是一个面向研究生的 Windows 桌面论文精读工具。它支
 - Electron 桌面应用，React + TypeScript 界面
 - App Shell 与 Reader 恢复解耦；3、30、300 篇目录均只加载轻量元数据
 - 每篇完整论文 Profile/OCR/书签独立保存到 `papers/<paperId>/profile.json`，按需读取并自动迁移旧数据
-- 一篇论文对应一份 SQLite 主笔记，正文按需加载，850 ms 防抖自动保存，切换论文与退出前强制保存
+- 一篇论文对应一份 SQLite 主笔记，首次创建自动写入论文名称一级标题，正文按需加载，850 ms 防抖自动保存，切换论文与退出前强制保存
+- 笔记编辑器使用独立、单例、按需创建的 BrowserWindow；保存尺寸、位置和最大化状态，显示器变化后自动回到可见区域
 - 富文本笔记支持字体、字号、颜色、背景、高亮、四级标题、对齐、列表、任务项、缩进、引用、表格、图片、公式、代码、链接和撤销重做
 - 笔记图片独立保存、按内容哈希去重，不以 Base64 长期进入数据库
 - PDF 选区与 AI 回答可由用户主动加入笔记；论文页码锚点可跳回阅读页
@@ -55,7 +58,9 @@ src/PdfViewer.tsx      PDF 渲染与文本选择
 src/services/parser.ts PDF 层级解析
 src/services/context.ts 检索与上下文预算入口
 src/TutorPanel.tsx     流式导师对话
-src/NoteEditor.tsx     Tiptap 富文本论文笔记
+electron/noteWindow.ts Notes BrowserWindow 单例、消息队列、几何恢复与关闭保存握手
+src/NoteWindowApp.tsx  独立笔记窗口 Renderer 与跨窗口同步
+src/NoteEditor.tsx     Tiptap 富文本论文笔记编辑器
 src/ExportCenter.tsx   多论文 DOCX 导出中心
 src/AiCallDetails.tsx  单次调用详情与上下文查看器
 src/services/aiObservability.ts 请求元数据、快照与安全清洗

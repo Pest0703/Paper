@@ -24,11 +24,43 @@ contextBridge.exposeInMainWorld("paperTutor", {
     ipcRenderer.on("export-progress", fn);
     return () => ipcRenderer.removeListener("export-progress", fn);
   },
-  onBeforeClose: (cb: () => void) => {
-    ipcRenderer.on("flush-notes-before-close", cb);
-    return () => ipcRenderer.removeListener("flush-notes-before-close", cb);
+  openNoteWindow: (context: unknown) =>
+    ipcRenderer.invoke("note-window-open", context),
+  updateNoteContext: (context: unknown) =>
+    ipcRenderer.invoke("note-context-update", context),
+  insertIntoNote: (request: unknown) =>
+    ipcRenderer.invoke("note-insert", request),
+  noteWindowReady: () => ipcRenderer.invoke("note-window-ready"),
+  getNoteContext: () => ipcRenderer.invoke("note-context-get"),
+  onNoteContext: (cb: (context: unknown) => void) => {
+    const fn = (_event: unknown, context: unknown) => cb(context);
+    ipcRenderer.on("note-context-changed", fn);
+    return () => ipcRenderer.removeListener("note-context-changed", fn);
   },
-  confirmNotesFlushed: () => ipcRenderer.invoke("notes-flushed"),
+  onNoteInsertion: (cb: (request: unknown) => void) => {
+    const fn = (_event: unknown, request: unknown) => cb(request);
+    ipcRenderer.on("note-insert-request", fn);
+    return () => ipcRenderer.removeListener("note-insert-request", fn);
+  },
+  onNoteFlushRequest: (cb: (requestId: string) => void) => {
+    const fn = (_event: unknown, requestId: string) => cb(requestId);
+    ipcRenderer.on("note-flush-request", fn);
+    return () => ipcRenderer.removeListener("note-flush-request", fn);
+  },
+  confirmNoteFlush: (requestId: string, ok: boolean) =>
+    ipcRenderer.invoke("note-flush-complete", requestId, ok),
+  jumpToPaper: (target: unknown) => ipcRenderer.invoke("note-jump", target),
+  onJumpToPaper: (cb: (target: unknown) => void) => {
+    const fn = (_event: unknown, target: unknown) => cb(target);
+    ipcRenderer.on("jump-to-paper", fn);
+    return () => ipcRenderer.removeListener("jump-to-paper", fn);
+  },
+  requestExportCenter: () => ipcRenderer.invoke("open-export-center"),
+  onOpenExportCenter: (cb: () => void) => {
+    const fn = () => cb();
+    ipcRenderer.on("show-export-center", fn);
+    return () => ipcRenderer.removeListener("show-export-center", fn);
+  },
   loadSecret: () => ipcRenderer.invoke("load-secret"),
   saveSecret: (key: string) => ipcRenderer.invoke("save-secret", key),
   loadSecrets: () => ipcRenderer.invoke("load-secrets"),

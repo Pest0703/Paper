@@ -14,7 +14,17 @@ export type NoteRow = {
   content: unknown;
 };
 
-const emptyDocument = { type: "doc", content: [{ type: "paragraph" }] };
+const initialDocument = (title: string) => ({
+  type: "doc",
+  content: [
+    {
+      type: "heading",
+      attrs: { level: 1 },
+      content: [{ type: "text", text: title || "论文笔记" }],
+    },
+    { type: "paragraph" },
+  ],
+});
 
 export class NoteStore {
   private db: DatabaseSync;
@@ -78,7 +88,7 @@ export class NoteStore {
         .run(id, paperId, title, now, now);
       this.db
         .prepare("INSERT INTO note_documents(note_id,content_json) VALUES(?,?)")
-        .run(id, JSON.stringify(emptyDocument));
+        .run(id, JSON.stringify(initialDocument(title)));
       this.db.exec("COMMIT");
     } catch (error) {
       this.db.exec("ROLLBACK");

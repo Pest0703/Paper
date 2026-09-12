@@ -16,6 +16,17 @@ describe("note store", () => {
     dirs.push(dir);
     return { dir, store: new NoteStore(dir) };
   };
+  it("creates a first note with the paper title as an H1", () => {
+    const { store } = create();
+    const note = store.getOrCreate("paper-title", "A Reliable Paper");
+    expect((note.content as any).content[0]).toEqual({
+      type: "heading",
+      attrs: { level: 1 },
+      content: [{ type: "text", text: "A Reliable Paper" }],
+    });
+    expect(store.getOrCreate("paper-title", "Changed Title").content).toEqual(note.content);
+    store.close();
+  });
   it("keeps exactly one primary note per paper and persists rich JSON", () => {
     const { dir, store } = create();
     const first = store.getOrCreate("paper-alpha", "Paper Alpha");

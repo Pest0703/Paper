@@ -17,7 +17,6 @@ import { Settings } from "./Settings";
 import { TutorPanel, type Turn } from "./TutorPanel";
 import { OcrPanel } from "./OcrPanel";
 import { PaperLibrary } from "./PaperLibrary";
-import type { NoteEditorHandle, NoteInsertion } from "./NoteEditor";
 import {
   ocrPagesFromProfile,
   upsertOcrPage,
@@ -63,6 +62,8 @@ import type {
   PaperLibraryItem,
   PaperFullData,
   PaperRecord,
+  NoteInsertion,
+  NotePaperContext,
   Settings as SettingsType,
 } from "./types";
 const defaults: SettingsType = {
@@ -79,9 +80,6 @@ const defaults: SettingsType = {
   streaming: true,
   timeout: 180000,
 };
-const NoteEditor = lazy(() =>
-  import("./NoteEditor").then((module) => ({ default: module.NoteEditor })),
-);
 const PdfViewer = lazy(() =>
   import("./PdfViewer").then((module) => ({ default: module.PdfViewer })),
 );
@@ -117,11 +115,7 @@ export function App() {
   const [panel, setPanel] = useState(true);
   const [ocrOpen, setOcrOpen] = useState(false);
   const [libraryOpen, setLibraryOpen] = useState(false);
-  const [noteOpen, setNoteOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
-  const [noteInsertion, setNoteInsertion] = useState<NoteInsertion | null>(
-    null,
-  );
   const [selectedPage, setSelectedPage] = useState(1);
   const [ocrBusy, setOcrBusy] = useState(false);
   const [ocrPages, setOcrPages] = useState<OcrPageResult[]>([]);
@@ -152,7 +146,6 @@ export function App() {
   const paperRef = useRef<PaperRecord | null>(null);
   const profileCache = useRef(new LruCache<string, PaperFullData>(3));
   const pdfRef = useRef<PDFDocumentProxy | null>(null);
-  const noteEditorRef = useRef<NoteEditorHandle>(null);
   useEffect(() => {
     document.documentElement.dataset.shellReady = String(
       Math.round(performance.now()),
@@ -162,14 +155,6 @@ export function App() {
         `[Startup Performance] React Shell Mounted ${Math.round(performance.now())} ms`,
       );
   }, []);
-  useEffect(
-    () =>
-      window.paperTutor.onBeforeClose(async () => {
-        await noteEditorRef.current?.flush();
-        await window.paperTutor.confirmNotesFlushed();
-      }),
-    [],
-  );
   useEffect(() => {
     Promise.all([
       window.paperTutor.loadState(),
@@ -231,7 +216,6 @@ export function App() {
     const restoreStarted = performance.now();
     if (import.meta.env.DEV)
       console.info("[Startup Performance] Active Paper Restore Start");
-    await noteEditorRef.current?.flush();
     let data: PaperFullData | null | undefined = profileCache.current.get(
       rec.id,
     );
@@ -949,6 +933,26 @@ export function App() {
         : null,
     [paper],
   );
+  const noteContext = useMemo<NotePaperContext | null>(() => paper ? ({
+    paperId: paper.id,
+    title: paper.profile.title || paper.name,
+    page: paper.page,
+    sectionId: current?.id,
+  }) : null, [paper?.id, paper?.page, paper?.name, paper?.profile.title, current?.id]);
+  useEffect(() => {
+    if (noteContext) void window.paperTutor.updateNoteContext(noteContext);
+  }, [noteContext]);
+  useEffect(() => window.paperTutor.onOpenExportCenter(() => setExportOpen(true)), []);
+  useEffect(() => window.paperTutor.onJumpToPaper((target) => {
+    const active = paperRef.current;
+    if (active?.id === target.paperId) {
+      updateRec({ page: target.page });
+      setView("reader");
+      return;
+    }
+    const record = papers.find((item) => item.id === target.paperId);
+    if (record) void openRecord({ ...record, page: target.page });
+  }), [papers, settings, keys]);
   return (
     <div className="app-shell">
       <nav className="topbar">
@@ -1001,7 +1005,7 @@ export function App() {
           {paper && (
             <button
               className="status"
-              onClick={() => setNoteOpen(true)}
+              onClick={() => noteContext && void window.paperTutor.openNoteWindow(noteContext)}
               aria-label="打开论文笔记"
             >
               <NotePencil />
@@ -1114,30 +1118,32 @@ export function App() {
               onJump={(p) => updateRec({ page: p })}
               promptDebug={promptDebug}
               onAddSelection={() => {
-                if (!selected.trim()) return;
-                setNoteOpen(true);
-                setNoteInsertion({
+                if (!selected.trim() || !noteContext) return;
+                const insertion: NoteInsertion = {
                   id: crypto.randomUUID(),
+                  paperId: noteContext.paperId,
                   kind: "quote",
                   text: selected,
                   page: selectedPage,
                   sectionId: current?.id,
-                });
+                };
+                void window.paperTutor.insertIntoNote({ context: noteContext, insertion });
               }}
               onAddAnswer={() => {
                 const text =
                   answer ||
                   turns.filter((t) => t.role === "assistant").at(-1)?.content ||
                   "";
-                if (!text) return;
-                setNoteOpen(true);
-                setNoteInsertion({
+                if (!text || !noteContext) return;
+                const insertion: NoteInsertion = {
                   id: crypto.randomUUID(),
+                  paperId: noteContext.paperId,
                   kind: "ai",
                   text,
                   page: selectedPage,
                   sectionId: current?.id,
-                });
+                };
+                void window.paperTutor.insertIntoNote({ context: noteContext, insertion });
               }}
             />
           )}
@@ -1182,24 +1188,6 @@ export function App() {
           onImportFolder={importPaperFolder}
           onClose={() => setLibraryOpen(false)}
         />
-      )}
-      {noteOpen && paper && (
-        <Suspense
-          fallback={<div className="panel-loading">正在打开论文笔记…</div>}
-        >
-          <NoteEditor
-            ref={noteEditorRef}
-            paper={paper}
-            pending={noteInsertion}
-            onConsumed={() => setNoteInsertion(null)}
-            onClose={() => setNoteOpen(false)}
-            onAnchor={(page) => {
-              updateRec({ page });
-              setNoteOpen(false);
-              setView("reader");
-            }}
-          />
-        </Suspense>
       )}
       {exportOpen && (
         <Suspense

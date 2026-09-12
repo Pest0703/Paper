@@ -850,44 +850,62 @@
 .library-empty svg {
   font-size: 42px;
 }
-.note-panel {
-  position: fixed;
-  inset: 0 0 0 auto;
-  z-index: 35;
+.note-window-editor {
+  height: 100dvh;
   display: grid;
   grid-template-rows: auto auto auto minmax(0, 1fr);
-  width: min(720px, 96vw);
+  min-width: 0;
   background: #f4f5f1;
-  border-left: 1px solid var(--line);
-  box-shadow: -18px 0 48px rgba(22, 33, 30, 0.2);
 }
-.note-panel > header {
+.note-window-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 24px;
   padding: 18px 22px;
   background: white;
   border-bottom: 1px solid var(--line);
 }
-.note-panel h2 {
+.note-window-header h1 {
   margin: 2px 0;
-  font-size: 17px;
+  max-width: min(720px, 70vw);
+  overflow: hidden;
+  font-size: 20px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.note-panel header small {
+.note-window-header small {
   color: var(--muted);
 }
-.note-panel header button {
-  width: 34px;
-  height: 34px;
-  border: 0;
-  border-radius: 9px;
-  cursor: pointer;
+.note-save-status { display:flex; align-items:center; gap:8px; flex:none; font-size:12px; color:var(--accent); }
+.note-save-status.saving { color:var(--muted); }
+.note-save-status.error,.note-save-error { color:#9a3b2f; }
+.note-save-status button { border:1px solid #d9a097; border-radius:7px; background:#fff4f1; padding:5px 8px; cursor:pointer; }
+.note-save-error { padding:8px 22px; background:#fff0ed; font-size:12px; }
+.note-operation-error { position:fixed; right:18px; bottom:18px; z-index:30; max-width:440px; padding:10px 14px; border-radius:9px; background:#8e3c31; color:white; font-size:12px; box-shadow:0 12px 32px rgba(0,0,0,.2); }
+.note-window-empty { height:100dvh; display:grid; place-items:center; padding:40px; background:#f4f5f1; text-align:center; }
+.note-window-empty h1 { margin:8px 0; font-size:24px; }
+.note-window-empty p:last-child { color:var(--muted); }
+.note-tool-group {
+  display:flex;
+  align-items:center;
+  gap:5px;
+  min-width:0;
+  padding:4px 6px;
+  border:1px solid #d5dcd7;
+  border-radius:8px;
+  background:#f8faf7;
 }
+.note-tool-group > span,.note-tool-group > summary { color:var(--muted); font-size:10px; font-weight:700; cursor:pointer; list-style:none; }
+.note-tool-group > summary::-webkit-details-marker { display:none; }
+.note-tool-group > div { display:flex; flex-wrap:wrap; gap:4px; align-items:center; }
+.note-tool-group label { display:flex; align-items:center; gap:2px; font-size:10px; color:var(--muted); }
+.note-toolbar button.active { color:white; border-color:var(--accent); background:var(--accent); }
 .note-toolbar {
   display: flex;
   flex-wrap: wrap;
   gap: 5px;
-  padding: 10px 14px;
+  padding: 9px 14px;
   background: #eef1ed;
   border-bottom: 1px solid var(--line);
 }
@@ -924,10 +942,11 @@
   background: #e6eeea;
   cursor: pointer;
 }
+.note-quick-actions .danger,.note-confirm .danger { color:#9a3b2f; background:#fff0ed; }
 .note-scroll {
   min-height: 0;
   overflow: auto;
-  padding: 24px;
+  padding: clamp(12px, 3vw, 30px);
 }
 .tiptap {
   min-height: calc(100vh - 245px);
@@ -987,6 +1006,29 @@
   background: #f3f5f2;
   border-left: 3px solid #647b73;
   font-family: "Cambria Math", serif;
+}
+.note-confirm { position:fixed; inset:0; z-index:20; display:grid; place-items:center; padding:20px; background:rgba(25,35,32,.42); }
+.note-confirm section { width:min(410px,100%); padding:24px; border-radius:14px; background:white; box-shadow:0 24px 70px rgba(0,0,0,.24); }
+.note-confirm h2 { margin:0 0 8px; font-size:19px; }
+.note-confirm p { color:var(--muted); }
+.note-confirm section div { display:flex; justify-content:flex-end; gap:8px; }
+.note-confirm button { padding:8px 13px; border:1px solid var(--line); border-radius:8px; background:white; cursor:pointer; }
+@media(max-width:900px){
+  .note-toolbar{align-content:flex-start;overflow:auto}
+  .note-tool-group{flex:1 1 auto}
+  .note-tool-group:not([open]){flex:0 0 auto}
+  .note-window-header{padding:13px 16px}
+  .note-window-header h1{max-width:58vw;font-size:17px}
+  .note-quick-actions{overflow-x:auto}
+  .note-quick-actions button{white-space:nowrap}
+  .tiptap{padding:28px 30px}
+}
+@media(max-width:780px){
+  .note-window-editor{grid-template-rows:auto minmax(72px,auto) auto minmax(0,1fr)}
+  .note-tool-group{display:block}
+  .note-tool-group > div{padding-top:5px}
+  .note-tool-group:not([open]) > div{display:none}
+  .tiptap{padding:22px;min-height:calc(100vh - 260px)}
 }
 .add-note {
   margin-top: 8px;

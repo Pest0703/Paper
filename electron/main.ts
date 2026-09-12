@@ -19,6 +19,12 @@ import { parseStreamData } from "./streamParser.js";
 import { classifyApiError, sanitizeApiErrorDetail } from "./apiErrors.js";
 import { NoteStore } from "./noteStore.js";
 import { buildNotesDocx, sanitizeFilename } from "./docxExport.js";
+import {
+  NoteWindowManager,
+  type NoteInsertRequest,
+  type NotePaperContext,
+  type NoteWindowState,
+} from "./noteWindow.js";
 
 type AppState = {
   library?: unknown[];
@@ -28,6 +34,7 @@ type AppState = {
   encryptedSecrets?: { text?: string; vision?: string; ocr?: string };
   answerCache?: Record<string, string>;
   ocrCache?: Record<string, string>;
+  noteWindowState?: NoteWindowState;
 };
 const store = new Store<AppState>({
   name: "papertutor-data",
@@ -44,6 +51,8 @@ const controllers = new Map<string, AbortController>();
 let win: BrowserWindow | null = null;
 let notes: NoteStore | null = null;
 let closeConfirmed = false;
+let mainClosePending = false;
+let noteWindows: NoteWindowManager | null = null;
 const execFileAsync = promisify(execFile);
 const activeConverted = new Set<string>();
 protocol.registerSchemesAsPrivileged([
@@ -153,6 +162,7 @@ async function prepareReadableDocument(sourcePath: string) {
 
 function createWindow() {
   closeConfirmed = false;
+  mainClosePending = false;
   win = new BrowserWindow({
     width: 1440,
     height: 900,
@@ -176,17 +186,27 @@ function createWindow() {
   win.on("close", (event) => {
     if (closeConfirmed) return;
     event.preventDefault();
-    win?.webContents.send("flush-notes-before-close");
-    setTimeout(() => {
+    if (mainClosePending) return;
+    mainClosePending = true;
+    void (async () => {
+      await noteWindows?.close(true);
       closeConfirmed = true;
       win?.destroy();
-    }, 2500);
+    })();
   });
+  win.on("closed", () => { win = null; });
 }
 
 app.whenReady().then(() => {
   devTiming("mainReady");
   notes = new NoteStore(app.getPath("userData"));
+  noteWindows = new NoteWindowManager(
+    path.join(import.meta.dirname, "preload.cjs"),
+    path.join(import.meta.dirname, "../dist/index.html"),
+    process.env.VITE_DEV_SERVER_URL,
+    () => store.get("noteWindowState"),
+    (state) => store.set("noteWindowState", state),
+  );
   protocol.handle("papertutor-note-asset", (request) => {
     const url = new URL(request.url);
     const parts = url.pathname.split("/").filter(Boolean);
@@ -215,24 +235,78 @@ app.on("window-all-closed", () => {
   notes = null;
   if (process.platform !== "darwin") app.quit();
 });
-ipcMain.handle("note-list", () => notes?.list() || []);
-ipcMain.handle("note-open", (_e, paperId: string, title: string) =>
-  notes!.getOrCreate(paperId, title),
+const validContext = (value: any): value is NotePaperContext =>
+  Boolean(value && typeof value.paperId === "string" && value.paperId &&
+    typeof value.title === "string" && Number.isFinite(value.page));
+const isMainSender = (event: Electron.IpcMainInvokeEvent) =>
+  Boolean(win && !win.isDestroyed() && event.sender === win.webContents);
+const isNoteSender = (event: Electron.IpcMainInvokeEvent) =>
+  Boolean(noteWindows?.isSender(event.sender));
+const isAppSender = (event: Electron.IpcMainInvokeEvent) =>
+  isMainSender(event) || isNoteSender(event);
+
+ipcMain.handle("note-window-open", (event, context: NotePaperContext) => {
+  if (!isMainSender(event) || !validContext(context)) return false;
+  noteWindows!.open(context, true);
+  return true;
+});
+ipcMain.handle("note-context-update", (event, context: NotePaperContext) => {
+  if (!isMainSender(event) || !validContext(context)) return false;
+  noteWindows!.updateContext(context);
+  return true;
+});
+ipcMain.handle("note-insert", (event, request: NoteInsertRequest) => {
+  if (!isMainSender(event) || !validContext(request?.context) ||
+      request?.insertion?.paperId !== request.context.paperId) return false;
+  noteWindows!.insert(request);
+  return true;
+});
+ipcMain.handle("note-window-ready", (event) => {
+  if (!isNoteSender(event)) return false;
+  noteWindows!.rendererReady();
+  return true;
+});
+ipcMain.handle("note-context-get", (event) =>
+  isNoteSender(event) ? noteWindows?.currentContext || null : null,
 );
-ipcMain.handle("note-save", (_e, note: any) => {
+ipcMain.handle("note-flush-complete", (event, requestId: string, ok: boolean) => {
+  if (!isNoteSender(event)) return false;
+  noteWindows!.acknowledgeFlush(requestId, Boolean(ok));
+  return true;
+});
+ipcMain.handle("note-jump", (event, target: { paperId: string; page: number }) => {
+  if (!isNoteSender(event) || !target?.paperId || !Number.isFinite(target.page)) return false;
+  win?.webContents.send("jump-to-paper", target);
+  win?.show();
+  win?.focus();
+  return true;
+});
+ipcMain.handle("open-export-center", (event) => {
+  if (!isNoteSender(event)) return false;
+  win?.webContents.send("show-export-center");
+  win?.show();
+  win?.focus();
+  return true;
+});
+ipcMain.handle("note-list", (event) => {
+  if (!isAppSender(event)) throw new Error("Forbidden");
+  return notes?.list() || [];
+});
+ipcMain.handle("note-open", (event, paperId: string, title: string) => {
+  if (!isAppSender(event)) throw new Error("Forbidden");
+  return notes!.getOrCreate(paperId, title);
+});
+ipcMain.handle("note-save", (event, note: any) => {
+  if (!isAppSender(event)) throw new Error("Forbidden");
   notes!.save(note);
   return true;
 });
-ipcMain.handle("open-external", (_e, target: string) => {
+ipcMain.handle("open-external", (event, target: string) => {
+  if (!isAppSender(event)) throw new Error("Forbidden");
   const url = new URL(target);
   if (!["http:", "https:"].includes(url.protocol))
     throw new Error("不允许的链接协议");
   return shell.openExternal(url.toString());
-});
-ipcMain.handle("notes-flushed", () => {
-  closeConfirmed = true;
-  win?.destroy();
-  return true;
 });
 async function persistNoteImage(
   noteId: string,
@@ -257,8 +331,9 @@ async function persistNoteImage(
   });
   return `papertutor-note-asset://asset/${safeId(noteId)}/${filename}`;
 }
-ipcMain.handle("note-choose-image", async (_e, noteId: string) => {
-  const result = await dialog.showOpenDialog(win!, {
+ipcMain.handle("note-choose-image", async (event, noteId: string) => {
+  if (!isNoteSender(event)) throw new Error("Forbidden");
+  const result = await dialog.showOpenDialog(noteWindows!.browserWindow!, {
     properties: ["openFile"],
     filters: [
       { name: "图片", extensions: ["png", "jpg", "jpeg", "gif", "webp"] },
@@ -274,10 +349,13 @@ ipcMain.handle("note-choose-image", async (_e, noteId: string) => {
 });
 ipcMain.handle(
   "note-save-image",
-  (_e, noteId: string, bytes: Uint8Array, mime: string) =>
-    persistNoteImage(noteId, bytes, mime.split("/")[1] || "png"),
+  (event, noteId: string, bytes: Uint8Array, mime: string) => {
+    if (!isNoteSender(event)) throw new Error("Forbidden");
+    return persistNoteImage(noteId, bytes, mime.split("/")[1] || "png");
+  },
 );
-ipcMain.handle("export-notes", async (_e, payload: any) => {
+ipcMain.handle("export-notes", async (event, payload: any) => {
+  if (!isMainSender(event)) throw new Error("Forbidden");
   const library = (store.get("library") || []) as any[];
   const selected = (payload.paperIds || [])
     .map((paperId: string) => {
