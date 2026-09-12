@@ -290,6 +290,37 @@ export function App() {
     await window.paperTutor.saveState({ library: next, settings });
     setLibraryOpen(true);
   }
+  async function deletePaper(record: PaperLibraryItem) {
+    const deletingActive = paperRef.current?.id === record.id;
+    if (deletingActive) await releasePdf();
+    try {
+      const result = await window.paperTutor.deletePaper(record.id);
+      if (!result.deleted) throw new Error("论文已不在 PaperTutor 目录中");
+    } catch (error) {
+      if (deletingActive) void openRecord(record);
+      throw error;
+    }
+    profileCache.current.delete(record.id);
+    answerCache.current = new Map(
+      [...answerCache.current].filter(([key]) => !key.startsWith(`${record.id}:`)),
+    );
+    ocrCache.current = new Map(
+      [...ocrCache.current].filter(([key]) => !key.startsWith(`${record.id}:`)),
+    );
+    setPapers((existing) => existing.filter((item) => item.id !== record.id));
+    if (deletingActive) {
+      paperRef.current = null;
+      setPaper(null);
+      setOcrPages([]);
+      setSelected("");
+      setOriginalSelected("");
+      setCapture(null);
+      setAnswer("");
+      setAnswerCall(null);
+      setTurns([]);
+      setView("reader");
+    }
+  }
   async function analyzePaper(
     seed: PaperLibraryItem,
     runtimeSettings = settings,
@@ -1186,6 +1217,7 @@ export function App() {
           onOpen={openRecord}
           onImportPaper={importPdf}
           onImportFolder={importPaperFolder}
+          onDelete={deletePaper}
           onClose={() => setLibraryOpen(false)}
         />
       )}

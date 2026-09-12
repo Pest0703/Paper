@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld("paperTutor", {
   loadPaperData: (id: string) => ipcRenderer.invoke("load-paper-data", id),
   savePaperData: (id: string, data: unknown) =>
     ipcRenderer.invoke("save-paper-data", id, data),
+  deletePaper: (id: string) => ipcRenderer.invoke("delete-paper", id),
   noteList: () => ipcRenderer.invoke("note-list"),
   noteOpen: (paperId: string, title: string) =>
     ipcRenderer.invoke("note-open", paperId, title),

@@ -448,3 +448,63 @@ test("uses one lazy notes window and brokers context, inserts, anchors, export, 
   await app.close();
   fs.rmSync(profile, { recursive: true, force: true });
 });
+
+test("removes all PaperTutor data for a paper but preserves and freshly reimports the source", async () => {
+  const profile = fs.mkdtempSync(path.join(os.tmpdir(), "papertutor-delete-"));
+  const alpha = await seedReadyPaper(profile, "paper-delete-alpha", "sample-alpha.pdf");
+  const beta = await seedReadyPaper(profile, "paper-delete-beta", "sample-beta.pdf");
+  fs.writeFileSync(path.join(profile, "papertutor-data.json"), JSON.stringify({
+    library: [alpha, beta],
+    activePaperId: alpha.id,
+    settings: {},
+    answerCache: { [`${alpha.id}:answer`]: "remove", [`${beta.id}:answer`]: "keep" },
+    ocrCache: { [`${alpha.id}:ocr`]: "remove", [`${beta.id}:ocr`]: "keep" },
+  }));
+  const app = await electron.launch({
+    args: [".", `--user-data-dir=${profile}`, `--test-pdf=${alpha.path}`],
+    cwd: path.resolve("."),
+    env: { ...process.env, DEEPSEEK_API_KEY: "" },
+  });
+  const main = await app.firstWindow();
+  await main.getByLabel("打开论文笔记").waitFor({ timeout: 15000 });
+  const noteId = await main.evaluate(async ({ paperId, title }) => (await window.paperTutor.noteOpen(paperId, title)).id, { paperId: alpha.id, title: alpha.title });
+  const assetDirectory = path.join(profile, "note-assets", noteId);
+  fs.mkdirSync(assetDirectory, { recursive: true });
+  fs.writeFileSync(path.join(assetDirectory, "asset.png"), "runtime-only");
+  await main.getByLabel("打开论文笔记").click();
+  const notesPage = await noteWindow(app);
+  await notesPage.getByRole("button", { name: /继续记录/ }).click();
+  await notesPage.locator(".tiptap").pressSequentially(" Unsaved note before deletion");
+
+  await main.bringToFront();
+  await main.getByLabel("打开论文目录").click();
+  const row = main.locator(".library-paper-row").filter({ hasText: alpha.name });
+  await row.getByLabel("从目录删除论文").click();
+  const dialog = main.getByRole("dialog", { name: "确认删除论文" });
+  await expect(dialog).toContainText("原始论文文件不会被删除");
+  await expect(dialog).toContainText("笔记和笔记图片将永久删除");
+  await dialog.getByRole("button", { name: "取消" }).click();
+  await expect(row).toBeVisible();
+  await row.getByLabel("从目录删除论文").click();
+  await dialog.getByRole("button", { name: "确认永久删除" }).click();
+  await expect(row).toHaveCount(0);
+  await expect(main.locator(".paper-title strong")).toHaveText("还没有打开论文");
+  await expect.poll(() => app.windows().length).toBe(1);
+  expect(fs.existsSync(alpha.path)).toBe(true);
+  expect(fs.existsSync(path.join(profile, "papers", alpha.id))).toBe(false);
+  expect(fs.existsSync(assetDirectory)).toBe(false);
+  expect(await main.evaluate(async (paperId) => (await window.paperTutor.noteList()).some((note: any) => note.paperId === paperId), alpha.id)).toBe(false);
+
+  await main.getByLabel("论文目录").getByRole("button", { name: "导入论文" }).click();
+  await expect(main.getByRole("heading", { name: "模型与存储" })).toBeVisible({ timeout: 30000 });
+  const reimported = await main.evaluate(async () => (await window.paperTutor.loadState()).library);
+  expect(reimported).toHaveLength(2);
+  expect(reimported.some((paper: any) => paper.name === alpha.name && paper.id !== alpha.id)).toBe(true);
+  await app.close();
+  const state = JSON.parse(fs.readFileSync(path.join(profile, "papertutor-data.json"), "utf8"));
+  expect(Object.keys(state.answerCache || {}).some((key) => key.startsWith(`${alpha.id}:`))).toBe(false);
+  expect(Object.keys(state.ocrCache || {}).some((key) => key.startsWith(`${alpha.id}:`))).toBe(false);
+  expect(state.answerCache[`${beta.id}:answer`]).toBe("keep");
+  expect(state.ocrCache[`${beta.id}:ocr`]).toBe("keep");
+  fs.rmSync(profile, { recursive: true, force: true });
+});

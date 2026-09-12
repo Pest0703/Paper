@@ -14,6 +14,9 @@ export class LruCache<K, V> {
     while (this.values.size > this.limit)
       this.values.delete(this.values.keys().next().value!);
   }
+  delete(key: K) {
+    return this.values.delete(key);
+  }
   get size() {
     return this.values.size;
   }

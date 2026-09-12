@@ -136,6 +136,11 @@ declare global {
       saveState(patch: any): Promise<boolean>;
       loadPaperData(id: string): Promise<PaperFullData | null>;
       savePaperData(id: string, data: PaperFullData): Promise<boolean>;
+      deletePaper(id: string): Promise<{
+        deleted: boolean;
+        noteDeleted: boolean;
+        conversionFilesDeleted: number;
+      }>;
       noteList(): Promise<any[]>;
       noteOpen(paperId: string, title: string): Promise<NoteDocument>;
       noteSave(note: Partial<NoteDocument> & { id: string }): Promise<boolean>;

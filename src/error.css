@@ -808,18 +808,36 @@
   gap: 8px;
   margin-top: 16px;
 }
-.paper-library .library-list > button {
-  padding: 14px;
+.library-paper-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 38px;
+  align-items: stretch;
   border: 1px solid #dbe1dd;
   border-radius: 11px;
   background: white;
+  overflow: hidden;
+}
+.paper-library .library-paper-open {
+  min-width: 0;
+  padding: 14px;
+  border: 0;
+  background: transparent;
   text-align: left;
   cursor: pointer;
 }
-.paper-library .library-list > button.active {
+.paper-library .library-paper-row.active {
   border-color: var(--accent);
   box-shadow: inset 3px 0 var(--accent);
 }
+.library-paper-delete {
+  width: 38px;
+  border: 0;
+  border-left: 1px solid #edf0ed;
+  background: transparent;
+  color: #8d4b43;
+  cursor: pointer;
+}
+.library-paper-delete:hover { background:#fff0ed; color:#a33428; }
 .paper-library .library-list strong {
   display: block;
   overflow: hidden;
@@ -850,6 +868,16 @@
 .library-empty svg {
   font-size: 42px;
 }
+.library-delete-backdrop { position:fixed; inset:0; z-index:60; display:grid; place-items:center; padding:20px; background:rgba(22,31,29,.48); }
+.library-delete-backdrop section { width:min(460px,100%); padding:26px; border-radius:15px; background:white; box-shadow:0 28px 80px rgba(0,0,0,.28); }
+.library-delete-backdrop h3 { margin:3px 0 12px; font-size:21px; }
+.library-delete-backdrop section > strong { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.library-delete-backdrop section > p:not(.eyebrow) { margin:12px 0; color:var(--muted); font-size:12px; line-height:1.65; }
+.library-delete-backdrop section > div:last-child { display:flex; justify-content:flex-end; gap:8px; margin-top:20px; }
+.library-delete-backdrop button { padding:9px 14px; border:1px solid var(--line); border-radius:8px; background:white; cursor:pointer; }
+.library-delete-backdrop button.danger { border-color:#b74b3e; background:#a53d31; color:white; }
+.library-delete-backdrop button:disabled { opacity:.55; cursor:wait; }
+.library-delete-error { padding:9px 11px; border-radius:8px; background:#fff0ed; color:#9a3b2f; font-size:12px; }
 .note-window-editor {
   height: 100dvh;
   display: grid;

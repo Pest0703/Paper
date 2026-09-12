@@ -123,11 +123,7 @@ async function prepareReadableDocument(sourcePath: string) {
   if (process.platform !== "win32")
     throw new Error("DOC/DOCX 导入当前需要 Windows 与 Microsoft Word。");
   const stat = await fs.stat(sourcePath),
-    fingerprint = crypto
-      .createHash("sha256")
-      .update(`${path.resolve(sourcePath)}:${stat.size}:${stat.mtimeMs}`)
-      .digest("hex")
-      .slice(0, 24);
+    fingerprint = conversionFingerprint(sourcePath, stat.size, stat.mtimeMs);
   const dir = path.join(app.getPath("userData"), "converted-documents"),
     target = path.join(dir, `${fingerprint}.pdf`),
     staging = path.join(dir, `${fingerprint}${ext}`),
@@ -159,6 +155,17 @@ async function prepareReadableDocument(sourcePath: string) {
     );
   }
 }
+
+const conversionFingerprint = (
+  sourcePath: string,
+  size: number,
+  modifiedAt: number,
+) =>
+  crypto
+    .createHash("sha256")
+    .update(`${path.resolve(sourcePath)}:${size}:${modifiedAt}`)
+    .digest("hex")
+    .slice(0, 24);
 
 function createWindow() {
   closeConfirmed = false;
@@ -541,6 +548,59 @@ ipcMain.handle("load-paper-data", async (_e, id: string) => {
 ipcMain.handle("save-paper-data", async (_e, id: string, data: any) => {
   await savePaperData(id, data);
   return true;
+});
+ipcMain.handle("delete-paper", async (event, id: string) => {
+  if (!isMainSender(event) || !id || safeId(id) !== id)
+    throw new Error("无效的论文标识");
+  const library = (store.get("library") || []) as any[];
+  const metadata = library.find((record) => record.id === id);
+  if (!metadata) return { deleted: false, noteDeleted: false, conversionFilesDeleted: 0 };
+  if (noteWindows?.currentContext?.paperId === id) {
+    const saved = await noteWindows.close(false);
+    if (!saved) throw new Error("笔记保存失败，已取消删除");
+  }
+  const noteId = notes?.loadByPaper(id)?.id || null;
+  if (noteId)
+    await fs.rm(path.join(app.getPath("userData"), "note-assets", safeId(noteId)), {
+      recursive: true,
+      force: true,
+    });
+  notes?.deleteByPaper(id);
+  await fs.rm(path.join(app.getPath("userData"), "papers", safeId(id)), {
+    recursive: true,
+    force: true,
+  });
+  let conversionFilesDeleted = 0;
+  if (/\.(doc|docx)$/i.test(String(metadata.path || ""))) {
+    try {
+      const stat = await fs.stat(metadata.path);
+      const fingerprint = conversionFingerprint(metadata.path, stat.size, stat.mtimeMs);
+      const directory = path.join(app.getPath("userData"), "converted-documents");
+      const targets = [
+        path.join(directory, `${fingerprint}.pdf`),
+        path.join(directory, `${fingerprint}${path.extname(metadata.path).toLowerCase()}`),
+      ];
+      for (const target of targets) {
+        const existed = await fs.access(target).then(() => true).catch(() => false);
+        await fs.rm(target, { force: true });
+        activeConverted.delete(path.resolve(target));
+        if (existed) conversionFilesDeleted += 1;
+      }
+    } catch (error: any) {
+      if (error?.code !== "ENOENT") throw new Error("Word 转换缓存删除失败");
+    }
+  }
+  const removePaperCache = (value: unknown) =>
+    Object.fromEntries(
+      Object.entries((value || {}) as Record<string, unknown>).filter(
+        ([key]) => !key.startsWith(`${id}:`),
+      ),
+    );
+  store.set("answerCache", removePaperCache(store.get("answerCache")));
+  store.set("ocrCache", removePaperCache(store.get("ocrCache")));
+  store.set("library", library.filter((record) => record.id !== id) as never);
+  if (store.get("activePaperId") === id) store.delete("activePaperId");
+  return { deleted: true, noteDeleted: Boolean(noteId), conversionFilesDeleted };
 });
 ipcMain.handle("save-secret", (_e, key: string) => {
   store.set(

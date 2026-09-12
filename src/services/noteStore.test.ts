@@ -115,4 +115,14 @@ describe("note store", () => {
     expect(store.cacheSize()).toBe(3);
     store.close();
   });
+  it("permanently deletes one paper note without affecting other notes", () => {
+    const { store } = create();
+    const alpha = store.getOrCreate("paper-alpha", "Paper Alpha");
+    const beta = store.getOrCreate("paper-beta", "Paper Beta");
+    expect(store.deleteByPaper("paper-alpha")).toBe(alpha.id);
+    expect(store.loadByPaper("paper-alpha")).toBeNull();
+    expect(store.loadByPaper("paper-beta")?.id).toBe(beta.id);
+    expect(store.deleteByPaper("paper-alpha")).toBeNull();
+    store.close();
+  });
 });

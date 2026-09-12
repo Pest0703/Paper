@@ -159,6 +159,22 @@ export class NoteStore {
       throw error;
     }
   }
+  deleteByPaper(paperId: string): string | null {
+    const existing = this.db
+      .prepare("SELECT id FROM notes WHERE paper_id=?")
+      .get(paperId) as { id: string } | undefined;
+    if (!existing) return null;
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      this.db.prepare("DELETE FROM notes WHERE paper_id=?").run(paperId);
+      this.db.exec("COMMIT");
+      this.cache.delete(existing.id);
+      return existing.id;
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
   private remember(note: NoteRow) {
     this.cache.delete(note.id);
     this.cache.set(note.id, note);
