@@ -7,6 +7,7 @@ import {
   GearSix,
   List,
   DotsThreeOutline,
+  Scan,
   SidebarSimple,
   Sparkle,
   UploadSimple,
@@ -14,6 +15,12 @@ import {
 import { PdfViewer } from "./PdfViewer";
 import { Settings } from "./Settings";
 import { TutorPanel, type Turn } from "./TutorPanel";
+import { OcrPanel } from "./OcrPanel";
+import {
+  ocrPagesFromProfile,
+  upsertOcrPage,
+  type OcrPageResult,
+} from "./services/ocrWorkspace";
 import {
   buildPromptRequest,
   summarizeConversation,
@@ -85,6 +92,9 @@ export function App() {
     "reader",
   );
   const [panel, setPanel] = useState(true);
+  const [ocrOpen, setOcrOpen] = useState(false);
+  const [ocrBusy, setOcrBusy] = useState(false);
+  const [ocrPages, setOcrPages] = useState<OcrPageResult[]>([]);
   const [selected, setSelected] = useState("");
   const [originalSelected, setOriginalSelected] = useState("");
   const [capture, setCapture] = useState<{
@@ -164,6 +174,7 @@ export function App() {
       };
       paperRef.current = restored;
       setPaper(restored);
+      setOcrPages(ocrPagesFromProfile(restored.profile));
       setView("reader");
     } catch {
       setError("无法重新打开这篇论文，原文件可能已移动。");
@@ -205,6 +216,7 @@ export function App() {
         );
         paperRef.current = rec;
         setPaper(rec);
+        setOcrPages(ocrPagesFromProfile(rec.profile));
         setPapers(next);
         await window.paperTutor.saveState({
           library: next,
@@ -262,6 +274,7 @@ export function App() {
       const next = [rec, ...papers.filter((p) => p.id !== id)];
       paperRef.current = rec;
       setPaper(rec);
+      setOcrPages(ocrPagesFromProfile(rec.profile));
       setPapers(next);
       await window.paperTutor.saveState({
         library: next,
@@ -531,10 +544,8 @@ export function App() {
         page: image.page,
       },
     });
-    setBusy(true);
-    setPanel(true);
-    setAnswer("");
-    setAnswerCall(null);
+    setOcrOpen(true);
+    setOcrBusy(true);
     const cached = ocrCache.current.get(cacheKey);
     if (cached) {
       snapshot.sections.push({
@@ -548,9 +559,10 @@ export function App() {
         latencyMs: 1,
         localCacheHit: true,
       });
-      setAnswer(cached);
-      setAnswerCall(call);
-      setBusy(false);
+      setOcrPages((pages) =>
+        upsertOcrPage(pages, { page: image.page, text: cached }),
+      );
+      setOcrBusy(false);
       recordMetric(call);
       return;
     }
@@ -566,7 +578,7 @@ export function App() {
       stream: false,
       timeout: settings.timeout,
     });
-    setBusy(false);
+    setOcrBusy(false);
     if (!r.ok) {
       setError(
         routeErrorMessage(
@@ -589,6 +601,7 @@ export function App() {
       page: image.page,
     });
     ocrCache.current.set(cacheKey, text);
+    setOcrPages((pages) => upsertOcrPage(pages, { page: image.page, text }));
     window.paperTutor.saveState({
       ocrCache: Object.fromEntries(ocrCache.current),
     });
@@ -621,10 +634,6 @@ export function App() {
       latencyMs: r.latency,
       localCacheHit: false,
     });
-    setAnswer(text);
-    setAnswerCall(call);
-    setSelected(`第 ${image.page} 页 OCR 结果`);
-    setOriginalSelected(`第 ${image.page} 页 OCR 结果`);
     recordMetric(call);
   }
   function onSelected(t: string) {
@@ -754,6 +763,7 @@ export function App() {
   async function clearCaches(_selected: string[]) {
     answerCache.current.clear();
     ocrCache.current.clear();
+    setOcrPages([]);
     const patch = cacheClearPatch(papers),
       cleaned = patch.library;
     setPapers(cleaned);
@@ -805,6 +815,14 @@ export function App() {
               已缓存
             </button>
           )}
+          <button
+            className="status"
+            onClick={() => setOcrOpen(true)}
+            aria-label="打开 OCR 文本页"
+          >
+            <Scan />
+            OCR 文本
+          </button>
           <button className="import" onClick={importPdf}>
             <UploadSimple />
             导入论文
@@ -836,7 +854,11 @@ export function App() {
       ) : view === "overview" && paper ? (
         <Overview paper={paper} onBack={() => setView("reader")} />
       ) : (
-        <div className={`workspace ${panel ? "" : "panel-closed"}`}>
+        <div
+          className={`workspace ${ocrOpen ? "ocr-open" : ""} ${
+            panel ? "tutor-open" : "panel-closed"
+          }`}
+        >
           <PdfViewer
             pdf={pdf}
             page={paper?.page || 1}
@@ -852,6 +874,14 @@ export function App() {
             onOcr={executeOcr}
             onSelect={onSelected}
           />
+          {ocrOpen && (
+            <OcrPanel
+              pages={ocrPages}
+              busy={ocrBusy}
+              onClose={() => setOcrOpen(false)}
+              onSelect={onSelected}
+            />
+          )}
           {panel && (
             <TutorPanel
               selected={selected}

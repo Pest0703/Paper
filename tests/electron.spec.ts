@@ -3,11 +3,24 @@ import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
 test("launches, adapts, and exposes three independent API sections", async () => {
-  const app = await electron.launch({ args: ["."], cwd: path.resolve(".") });
+  const profile = fs.mkdtempSync(path.join(os.tmpdir(), "papertutor-empty-"));
+  const app = await electron.launch({
+    args: [".", `--user-data-dir=${profile}`],
+    cwd: path.resolve("."),
+  });
   const page = await app.firstWindow();
   await expect(
     page.getByRole("button", { name: "PT PaperTutor" }),
   ).toBeVisible();
+  await page.getByLabel("打开 OCR 文本页").click();
+  await expect(
+    page.getByRole("region", { name: "OCR 文本页" }),
+  ).toBeVisible();
+  await expect(page.getByText("未进行OCR")).toBeVisible();
+  await page.getByLabel("关闭 OCR 文本页").click();
+  await expect(page.getByRole("region", { name: "OCR 文本页" })).toHaveCount(
+    0,
+  );
   fs.mkdirSync("screenshots", { recursive: true });
   for (const [w, h] of [
     [800, 600],
@@ -35,6 +48,7 @@ test("launches, adapts, and exposes three independent API sections", async () =>
   ).toBeVisible();
   await page.screenshot({ path: "screenshots/settings.png" });
   await app.close();
+  fs.rmSync(profile, { recursive: true, force: true });
 });
 test("imports a real PDF and preserves its local record after restart", async () => {
   const sample = path.resolve("test-assets/attention-is-all-you-need.pdf"),
